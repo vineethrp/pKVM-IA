@@ -15,10 +15,9 @@
 #define PKVM_HC_INIT_FINALISE		1
 #define PKVM_HC_FINALIZE_SHADOW_VM	4
 #define PKVM_HC_MMIO_ACCESS		7
-#define PKVM_HC_ACTIVATE_IOMMU		8
-#define PKVM_HC_TLB_REMOTE_FLUSH_RANGE	9
-#define PKVM_HC_SET_MMIO_VE		10
-#define PKVM_HC_ADD_PTDEV		11
+#define PKVM_HC_TLB_REMOTE_FLUSH_RANGE	8
+#define PKVM_HC_SET_MMIO_VE		9
+#define PKVM_HC_ADD_PTDEV		10
 
 #define PKVM_HC_DUMP_DMAR_TR_STRUCT	20
 #define PKVM_HC_DUMP_DOMAIN_PGT		21
@@ -39,6 +38,14 @@ extern bool __read_mostly enable_pkvm;	/* kernel command-line flag */
 extern struct static_key_false pkvm_ia_enabled_key;
 
 #define pkvm_ia_enabled() (bool)static_branch_likely(&pkvm_ia_enabled_key)
+
+struct pkvm_iommu_driver {
+	int (*prepare_driver)(void);
+	int (*init_driver)(void);
+	void (*remove_driver)(void);
+};
+
+int pkvm_iommu_register_driver(struct pkvm_iommu_driver *kern_ops);
 #endif
 
 DECLARE_PER_CPU_READ_MOSTLY(bool, pkvm_enabled);
