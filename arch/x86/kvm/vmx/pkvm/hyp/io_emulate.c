@@ -135,8 +135,8 @@ int handle_host_pio(struct kvm_vcpu *vcpu)
 	req.value = &vcpu->arch.regs[VCPU_REGS_RAX];
 	req.direction = (exit_qual & 8) == 0;
 
-	pkvm_dbg("pkvm: host %s I/O port 0x%x width %d value %lx\n", req.direction ?
-		"write" : "read", req.port, req.size, *req.value);
+	//pkvm_dbg("pkvm: host %s I/O port 0x%x width %d value %lx\n", req.direction ?
+	//	"write" : "read", req.port, req.size, *req.value);
 
 	return emulate_host_pio(vcpu, &req);
 }
@@ -369,8 +369,8 @@ bool try_emul_host_mmio(struct kvm_vcpu *vcpu, unsigned long gpa)
 		return true;
 	}
 
-	pkvm_dbg("pkvm: host %s MMIO gpa 0x%lx width %d value 0x%lx\n", req.direction ?
-		"write" : "read", req.address, req.size, *req.value);
+	//pkvm_dbg("pkvm: host %s MMIO gpa 0x%lx width %d value 0x%lx\n", req.direction ?
+	//	"write" : "read", req.address, req.size, *req.value);
 
 	if (mmio_check_overlap(&host_mmio_emul_table, gpa, gpa + req.size - 1)) {
 		emulate_host_mmio(vcpu, &req);
