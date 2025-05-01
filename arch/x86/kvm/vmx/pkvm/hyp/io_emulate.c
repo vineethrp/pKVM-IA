@@ -230,6 +230,7 @@ static int mmio_instruction_decode(struct kvm_vcpu *vcpu, unsigned long gpa,
 	unsigned long rip;
 	u8 insn[3];
 	int size;
+	int dest = VCPU_REGS_RAX;
 
 	rip = vmcs_readl(GUEST_RIP);
 
@@ -239,6 +240,13 @@ static int mmio_instruction_decode(struct kvm_vcpu *vcpu, unsigned long gpa,
 	 */
 	if (read_gva(vcpu, rip, insn, 3, &exception) < 0)
 		return -EINVAL;
+
+	if (insn[2] == 0x41 && insn[1] == 0xa5 && insn[0] == 0xf3) {
+		pkvm_dbg("pkvm: %s: movs dest=%lx, src=%lx, count=%lu\n",
+				__func__, vcpu->arch.regs[VCPU_REGS_RDI],
+				vcpu->arch.regs[VCPU_REGS_RSI],
+				vcpu->arch.regs[VCPU_REGS_RCX]);
+	}
 
 	/*
 	 * In case the compiler adds the REX prefix
@@ -291,6 +299,7 @@ static int mmio_instruction_decode(struct kvm_vcpu *vcpu, unsigned long gpa,
 	case 0x8b:
 		size = 4;
 		direction = PKVM_IO_READ;
+		dest = (insn[1] & 0x38) >> 3;
 		break;
 	default:
 		return -EIO;
@@ -298,7 +307,7 @@ static int mmio_instruction_decode(struct kvm_vcpu *vcpu, unsigned long gpa,
 
 	req->address = gpa;
 	req->size = size;
-	req->value = &vcpu->arch.regs[VCPU_REGS_RAX];
+	req->value = &vcpu->arch.regs[dest];
 	req->direction = direction;
 
 	if (zero_extend)
@@ -366,7 +375,7 @@ bool try_emul_host_mmio(struct kvm_vcpu *vcpu, unsigned long gpa)
 
 	if (mmio_instruction_decode(vcpu, gpa, &req)) {
 		pkvm_err("pkvm: MMIO instruction decode failed\n");
-		return true;
+		return false;
 	}
 
 	//pkvm_dbg("pkvm: host %s MMIO gpa 0x%lx width %d value 0x%lx\n", req.direction ?
