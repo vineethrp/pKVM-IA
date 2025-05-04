@@ -160,6 +160,8 @@ int pkvm_init_iommu(unsigned long mem_base, unsigned long nr_pages)
 		if (ret)
 			return ret;
 
+		pkvm_spin_lock_init(&piommu->qi_lock);
+
 		piommu->iommu.cap = readq(piommu->iommu.reg + DMAR_CAP_REG);
 		piommu->iommu.ecap = readq(piommu->iommu.reg + DMAR_ECAP_REG);
 		gsts = readl(piommu->iommu.reg + DMAR_GSTS_REG);
@@ -210,13 +212,20 @@ static void enable_qi(struct pkvm_iommu *iommu)
 			   readl, (sts & DMA_GSTS_QIES), sts);
 }
 
-static int create_qi_desc(struct pkvm_iommu *iommu)
+static int quiesce_qi(struct pkvm_iommu *iommu)
 {
 	struct pkvm_viommu *viommu = &iommu->viommu;
-	struct q_inval *qi = &iommu->qi;
 	void __iomem *reg = iommu->iommu.reg;
+	u64 iqa = readq(reg + DMAR_IQA_REG);
 
-	pkvm_spin_lock_init(&iommu->qi_lock);
+	/*
+	 * If irq remapping is enabled in host kernel, QI will be initialized
+	 * before pkvm initializes. In that case, IQA, IQT will be initialized.
+	 * Otherwise, we need to wait for the host to set IQA and enable QI.
+	 */
+	if (!iqa)
+		return 0;
+
 	/*
 	 * Before switching the descriptor, need to wait any pending
 	 * invalidation descriptor completed. According to spec 6.5.2,
@@ -229,13 +238,12 @@ static int create_qi_desc(struct pkvm_iommu *iommu)
 		readq(reg + DMAR_IQT_REG))
 		cpu_relax();
 
-	viommu->vreg.iqa = viommu->iqa = readq(reg + DMAR_IQA_REG);
+	viommu->vreg.iqa = viommu->iqa = iqa;
 	viommu->vreg.iq_head = readq(reg + DMAR_IQH_REG);
 	viommu->vreg.iq_tail = readq(reg + DMAR_IQT_REG);
 
 	if (viommu->vreg.gsts & DMA_GSTS_QIES) {
 		struct qi_desc *wait_desc;
-		u64 iqa = viommu->iqa;
 		int shift = IQ_DESC_SHIFT(iqa);
 		int offset = ((viommu->vreg.iq_head >> shift) +
 			      IQ_DESC_LEN(iqa) - 1) % IQ_DESC_LEN(iqa);
@@ -267,6 +275,19 @@ static int create_qi_desc(struct pkvm_iommu *iommu)
 			cpu_relax();
 	}
 
+	return 0;
+}
+
+static int create_qi_desc(struct pkvm_iommu *iommu)
+{
+	struct q_inval *qi = &iommu->qi;
+
+	if (iommu->qi_inited)
+		return 0;
+
+	if (quiesce_qi(iommu))
+		return -EINVAL;
+
 	qi->free_cnt = PKVM_QI_DESC_ALIGNED_SIZE / sizeof(struct qi_desc);
 	qi->desc = iommu_zalloc_pages(PKVM_QI_DESC_ALIGNED_SIZE);
 	if (!qi->desc)
@@ -279,6 +300,7 @@ static int create_qi_desc(struct pkvm_iommu *iommu)
 	}
 
 	enable_qi(iommu);
+	iommu->qi_inited = true;
 	return 0;
 }
 
@@ -729,6 +751,10 @@ static void handle_gcmd_qie(struct pkvm_iommu *iommu, bool en)
 		iommu->viommu.iqa = vreg->iqa;
 		vreg->iq_head = 0;
 		vreg->gsts |= DMA_GSTS_QIES;
+
+		if (!iommu->qi_inited)
+			create_qi_desc(iommu);
+
 		pkvm_dbg("pkvm: %s: enabled QI\n", __func__);
 		return;
 	}

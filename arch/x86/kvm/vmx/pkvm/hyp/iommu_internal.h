@@ -35,6 +35,7 @@ struct pkvm_iommu {
 	struct pkvm_viommu viommu;
 
 	struct q_inval qi;
+	bool qi_inited;
 	pkvm_spinlock_t qi_lock;
 	u64 piommu_iqa;
 
