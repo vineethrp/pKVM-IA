@@ -15,14 +15,15 @@
 #define PKVM_HC_INIT_FINALISE		1
 #define PKVM_HC_FINALIZE_SHADOW_VM	4
 #define PKVM_HC_MMIO_ACCESS		7
-#define PKVM_HC_IOMMU_SET_RTA		8
-#define PKVM_HC_IOMMU_UPDATE_CE		9
-#define PKVM_HC_IOMMU_MAP_PAGES		10
-#define PKVM_HC_IOMMU_UNMAP_PAGES	11
-#define PKVM_HC_IOMMU_IOVA2PHYS		12
-#define PKVM_HC_TLB_REMOTE_FLUSH_RANGE	13
-#define PKVM_HC_SET_MMIO_VE		14
-#define PKVM_HC_ADD_PTDEV		15
+#define PKVM_HC_IOMMU_DOMAIN_ALLOC	8
+#define PKVM_HC_IOMMU_SET_RTA		9
+#define PKVM_HC_IOMMU_UPDATE_CE		10
+#define PKVM_HC_IOMMU_MAP_PAGES		11
+#define PKVM_HC_IOMMU_UNMAP_PAGES	12
+#define PKVM_HC_IOMMU_IOVA2PHYS		13
+#define PKVM_HC_TLB_REMOTE_FLUSH_RANGE	14
+#define PKVM_HC_SET_MMIO_VE		15
+#define PKVM_HC_ADD_PTDEV		16
 
 #define PKVM_HC_DUMP_DMAR_TR_STRUCT	20
 #define PKVM_HC_DUMP_DOMAIN_PGT		21
@@ -115,6 +116,24 @@ static inline long pkvm_set_iommu_root(unsigned long reg_phys, unsigned long roo
 	long ret = 0;
 	if (likely(this_cpu_read(pkvm_enabled)))
 		ret = kvm_hypercall2(PKVM_HC_IOMMU_SET_RTA, reg_phys, root_addr);
+
+	return ret;
+}
+
+struct pkvm_iommu_domalloc_param {
+	u64 pgd_gpa;
+	u16 domain_gaw;
+	u16 domain_agaw;
+	u8 iommu_coherency;
+	u8 iommu_superpage;
+};
+
+static inline long pkvm_iommu_alloc_domain(struct pkvm_iommu_domalloc_param *param)
+{
+	long ret = 0;
+	if (likely(this_cpu_read(pkvm_enabled))) {
+		ret = kvm_hypercall1(PKVM_HC_IOMMU_DOMAIN_ALLOC, (unsigned long)param);
+	}
 
 	return ret;
 }

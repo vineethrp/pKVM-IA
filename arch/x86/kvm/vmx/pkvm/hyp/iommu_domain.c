@@ -749,3 +749,29 @@ unsigned long pkvm_iommu_domain_iova_to_phys(struct kvm_vcpu *hvcpu, unsigned lo
 
 	return ret;
 }
+
+unsigned long pkvm_iommu_domain_alloc(struct kvm_vcpu *hvcpu, unsigned long param_gva)
+{
+	struct pkvm_iommu_domalloc_param param = { 0 };
+	struct pkvm_iommu_domain *domain;
+	struct x86_exception e;
+	int ret = 0;
+
+	ret = read_gva(hvcpu, param_gva, &param, sizeof(struct pkvm_iommu_domalloc_param), &e);
+	if (ret < 0) {
+		pkvm_err("pkvm: %s Failed to read iova2phys_param (gva: %lx) from host!\n",
+				__func__, param_gva);
+		return ret;
+	}
+
+	PKVM_ASSERT(!pkvm_get_iommu_domain(param.pgd_gpa));
+	domain = pkvm_alloc_iommu_domain(param.pgd_gpa);
+	PKVM_ASSERT(domain);
+	domain->iommu_coherency = param.iommu_coherency;
+	domain->iommu_superpage = param.iommu_superpage;
+	domain->gaw = param.domain_gaw;
+	domain->agaw = param.domain_agaw;
+	__pkvm_host_donate_hyp(param.pgd_gpa, PAGE_SIZE);
+
+	return ret;
+}

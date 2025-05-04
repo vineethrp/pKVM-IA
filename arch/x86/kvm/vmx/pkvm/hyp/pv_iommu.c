@@ -184,6 +184,7 @@ unsigned long pkvm_iommu_update_ce(struct kvm_vcpu *hvcpu, unsigned long phys, u
 		}
 		if (new_ce_pgd) {
 			domain = pkvm_get_iommu_domain(new_ce_pgd);
+			PKVM_ASSERT(domain);
 			if (domain) {
 				PKVM_ASSERT(domain->iommu_coherency == iommu_coherency(iommu->iommu.ecap));
 				PKVM_ASSERT(domain->iommu_superpage == param.iommu_superpage);

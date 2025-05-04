@@ -116,6 +116,9 @@ static unsigned long handle_vmcall(struct kvm_vcpu *vcpu)
 		ret = pkvm_access_iommu(a0, a1, a2, a3);
 		break;
 #ifdef CONFIG_PKVM_INTEL_PVIOMMU
+	case PKVM_HC_IOMMU_DOMAIN_ALLOC:
+		ret = pkvm_iommu_domain_alloc(vcpu, a0);
+		break;
 	case PKVM_HC_IOMMU_SET_RTA:
 		ret = pkvm_iommu_set_rta(a0, a1);
 		break;
