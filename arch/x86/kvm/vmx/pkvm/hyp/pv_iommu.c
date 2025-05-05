@@ -78,6 +78,11 @@ unsigned long pkvm_iommu_set_rta(unsigned long phys, unsigned long rta_phys)
 	return 0;
 }
 
+static inline bool __valid_paging_pgd(u64 pgd)
+{
+	return pgd && (pgd != pkvm_host_ept_pgd());
+}
+
 unsigned long pkvm_iommu_update_ce(struct kvm_vcpu *hvcpu, unsigned long param_gva, unsigned long donation_gva)
 {
 	struct pkvm_iommu_page_donation donation;
@@ -144,6 +149,7 @@ unsigned long pkvm_iommu_update_ce(struct kvm_vcpu *hvcpu, unsigned long param_g
 		aw = (level == 3) ? 1 :
 		     (level == 4) ? 2 : 3;
 		context_lm_set_aw(ce, aw);
+		new_ce_pgd = pgd;
 	}
 
 
@@ -181,7 +187,7 @@ unsigned long pkvm_iommu_update_ce(struct kvm_vcpu *hvcpu, unsigned long param_g
 	if (old_ce_pgd != new_ce_pgd) {
 		struct pkvm_iommu_domain *domain;
 		struct pkvm_ptdev *ptdev;
-		if (old_ce_pgd) {
+		if (__valid_paging_pgd(old_ce_pgd)) {
 			domain = pkvm_get_iommu_domain(old_ce_pgd);
 			PKVM_ASSERT(domain);
 			pkvm_dbg("pkvm: %s put iommu domain pgd: %llx\n", __func__, domain->pgd);
@@ -193,7 +199,7 @@ unsigned long pkvm_iommu_update_ce(struct kvm_vcpu *hvcpu, unsigned long param_g
 			pkvm_domain_detach_iommu(domain, iommu);
 			pkvm_put_iommu_domain(domain);
 		}
-		if (new_ce_pgd) {
+		if (__valid_paging_pgd(new_ce_pgd)) {
 			domain = pkvm_get_iommu_domain(new_ce_pgd);
 			PKVM_ASSERT(domain);
 
