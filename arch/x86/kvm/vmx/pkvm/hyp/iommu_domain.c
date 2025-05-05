@@ -48,8 +48,6 @@ struct pkvm_iommu_domain *pkvm_get_iommu_domain(u64 pgd)
 	domain = __pkvm_get_iommu_domain_locked(pgd);
 
 	pkvm_spin_unlock(&iommu_domain_lock);
-	if (domain)
-		pkvm_dbg("pkvm: %s acquire iommu domain pgd: %llx\n", __func__, domain->pgd);
 
 	return domain;
 }
@@ -59,7 +57,6 @@ void pkvm_put_iommu_domain(struct pkvm_iommu_domain *domain)
 	if (!atomic_dec_and_test(&domain->refcount))
 		return;
 
-	pkvm_dbg("pkvm: %s release iommu domain pgd: %llx\n", __func__, domain->pgd);
 	pkvm_spin_lock(&iommu_domain_lock);
 
 	hlist_del(&domain->hnode);
@@ -96,7 +93,6 @@ struct pkvm_iommu_domain *pkvm_alloc_iommu_domain(u64 pgd)
 
 out:
 	pkvm_spin_unlock(&iommu_domain_lock);
-	pkvm_dbg("pkvm: %s alloc iommu domain pgd: %llx\n", __func__, domain->pgd);
 
 	return domain;
 }
@@ -114,8 +110,6 @@ int pkvm_domain_attach_iommu(struct pkvm_iommu_domain *domain, struct pkvm_iommu
 		pkvm_spin_lock(&domain->lock);
 		list_add_tail(&iommu->domain_node, &domain->iommu_head);
 		pkvm_spin_unlock(&domain->lock);
-		pkvm_dbg("pkvm: %s attached iommu[%d] to domain[pgd: %llx]\n",
-				__func__, iommu->iommu.seq_id, domain->pgd);
 	} else if (iommu->domain != domain) {
 		/*
 		 * IOMMU is part of a different domain.
@@ -124,8 +118,6 @@ int pkvm_domain_attach_iommu(struct pkvm_iommu_domain *domain, struct pkvm_iommu
 		goto out;
 	}
 	iommu->domain_refcount++;
-	pkvm_dbg("pkvm: %s iommu[%d] incremented refcount: %d\n",
-			__func__, iommu->iommu.seq_id, iommu->domain_refcount);
 
 out:
 	pkvm_spin_unlock(&iommu->lock);
@@ -142,15 +134,11 @@ void pkvm_domain_detach_iommu(struct pkvm_iommu_domain *domain, struct pkvm_iomm
 	pkvm_spin_lock(&iommu->lock);
 	PKVM_ASSERT(iommu->domain_refcount > 0);
 	iommu->domain_refcount--;
-	pkvm_dbg("pkvm: %s iommu[%d] decremented refcount: %d\n",
-			__func__, iommu->iommu.seq_id, iommu->domain_refcount);
 	if (!iommu->domain_refcount) {
 		pkvm_spin_lock(&domain->lock);
 		list_del_init(&iommu->domain_node);
 		pkvm_spin_unlock(&domain->lock);
 		iommu->domain = NULL;
-		pkvm_dbg("pkvm: %s detached iommu[%d] from domain[pgd: %llx]\n",
-				__func__, iommu->iommu.seq_id, domain->pgd);
 	}
 
 	pkvm_spin_unlock(&iommu->lock);
@@ -574,9 +562,6 @@ unsigned long pkvm_iommu_domain_map(struct kvm_vcpu *hvcpu,
 		pkvm_err("pkvm: %s, failed to get the domain [pgd:%llx]\n",
 				__func__, param.pgd_gpa);
 		return -EINVAL;
-	} else {
-		pkvm_dbg("pkvm: %s, retrieved domain[pgd: %llx] for domain mapping!\n",
-				__func__, domain->pgd);
 	}
 	pkvm_spin_lock(&domain->lock);
 	ret = domain_map(domain, &param, &donation);
@@ -679,7 +664,6 @@ static void domain_unmap(struct pkvm_iommu_domain *domain, unsigned long start_p
 
 	/* free pgd */
 	if (start_pfn == 0 && last_pfn == DOMAIN_MAX_PFN(domain->gaw)) {
-		pkvm_dbg("pkvm: %s freeing pgd: %llx\n", __func__, domain->pgd);
 		donation->pages[donation->nr_pages++] = domain->pgd;
 		__pkvm_hyp_donate_host(domain->pgd, PAGE_SIZE);
 		domain->pgd = 0ULL;
@@ -706,16 +690,12 @@ unsigned long pkvm_iommu_domain_unmap(struct kvm_vcpu *hvcpu, unsigned long pgd_
 		pkvm_err("pkvm: %s, failed to get the domain [pgd:%lx]\n",
 				__func__, pgd_gpa);
 		return -EINVAL;
-	} else {
-		pkvm_dbg("pkvm: %s, retrieved domain[pgd: %llx] for domain unmap!\n",
-				__func__, domain->pgd);
 	}
 	pkvm_spin_lock(&domain->lock);
 	domain_unmap(domain, start_pfn, last_pfn, &donation);
 	pkvm_spin_unlock(&domain->lock);
 	pkvm_put_iommu_domain(domain);
 
-	pkvm_dbg("pkvm: %s unused %d pages\n", __func__, donation.nr_pages);
 	ret = write_gva(hvcpu, donation_gva, &donation, sizeof(struct pkvm_iommu_page_donation), &e);
 	if (ret < 0) {
 		pkvm_err("pkvm: %s Failed to write donation(gva: %lx) to host!\n",
@@ -748,9 +728,6 @@ unsigned long pkvm_iommu_domain_iova_to_phys(struct kvm_vcpu *hvcpu, unsigned lo
 		pkvm_err("pkvm: %s, failed to get the domain [pgd:%llx]\n",
 				__func__, param.pgd_gpa);
 		return -EINVAL;
-	} else {
-		pkvm_dbg("pkvm: %s, retrieved domain[pgd: %llx] for iova2phys!\n",
-				__func__, domain->pgd);
 	}
 	pkvm_spin_lock(&domain->lock);
 	pte = pfn_to_dma_pte(domain, &donation, param.iova >> VTD_PAGE_SHIFT, &level);
@@ -760,7 +737,6 @@ unsigned long pkvm_iommu_domain_iova_to_phys(struct kvm_vcpu *hvcpu, unsigned lo
 					  VTD_PAGE_SHIFT) - 1));
 	pkvm_spin_unlock(&domain->lock);
 	pkvm_put_iommu_domain(domain);
-	pkvm_dbg("pkvm: %s, iova=%llx, phys=%lx, level=%d\n", __func__, param.iova, phys, level);
 
 	param.phys = phys;
 	param.level = level;
