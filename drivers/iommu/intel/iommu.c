@@ -3828,6 +3828,18 @@ static int md_domain_init(struct dmar_domain *domain, int guest_width)
 	if (!domain->pgd)
 		return -ENOMEM;
 	domain_flush_cache(domain, domain->pgd, PAGE_SIZE);
+#ifdef CONFIG_PKVM_INTEL_PVIOMMU
+	if (pkvm_ia_enabled()) {
+		struct pkvm_iommu_domalloc_param param = {
+			.pgd_gpa = virt_to_phys(domain->pgd),
+			.domain_gaw = domain->gaw,
+			.domain_agaw = domain->agaw,
+			.iommu_coherency = domain->iommu_coherency,
+			.iommu_superpage = domain->iommu_superpage,
+		};
+		pkvm_iommu_alloc_domain(&param);
+	}
+#endif
 	return ret;
 }
 
@@ -3913,6 +3925,18 @@ static struct dmar_domain *paging_domain_alloc(struct device *dev, bool first_st
 		return ERR_PTR(-ENOMEM);
 	}
 	domain_flush_cache(domain, domain->pgd, PAGE_SIZE);
+#ifdef CONFIG_PKVM_INTEL_PVIOMMU
+	if (pkvm_ia_enabled()) {
+		struct pkvm_iommu_domalloc_param param = {
+			.pgd_gpa = virt_to_phys(domain->pgd),
+			.domain_gaw = domain->gaw,
+			.domain_agaw = domain->agaw,
+			.iommu_coherency = domain->iommu_coherency,
+			.iommu_superpage = domain->iommu_superpage,
+		};
+		pkvm_iommu_alloc_domain(&param);
+	}
+#endif
 
 	return domain;
 }
