@@ -138,10 +138,29 @@ static inline long pkvm_iommu_alloc_domain(struct pkvm_iommu_domalloc_param *par
 	return ret;
 }
 
+#define PKVM_MAX_IOMMU_PAGE_DONATION	16
+/*
+ * For managing IOMMU page tables, pkvm would need free pages and host
+ * donates the pages as needed. This avoids static allocation of pages
+ * in pkvm during boot. map and unmap hypercalls use this structure as
+ * a two-way communication mechanism to manage page donation. Host
+ * allocates pages and updates nr_donated for the map hypercall. pkvm
+ * updates nr_returned with the pages not used or freed during map/unmap
+ * hypercalls.
+ * This is also used in update_ce hypercall to give back the pages when
+ * pagetable is trimmed due to change in agaw(levels).
+ */
+struct pkvm_iommu_page_donation {
+	int nr_pages;
+	phys_addr_t pages[PKVM_MAX_IOMMU_PAGE_DONATION]; /* page gpa */
+};
+
 /*
  * Parameters passed by the host for UPDATE_CE hypercall.
  */
 struct pkvm_update_ce_param {
+	u64 pgd;
+	u64 reg_phys;
 	u16 bdf;
 	u16 domain_gaw;
 	u16 domain_agaw;
@@ -152,30 +171,17 @@ struct pkvm_update_ce_param {
 	u64 ce_hi;
 };
 
-static inline long pkvm_update_context_entry(unsigned long reg_phys, struct pkvm_update_ce_param *param)
+static inline long pkvm_update_context_entry(struct pkvm_update_ce_param *param,
+		struct pkvm_iommu_page_donation *donation)
 {
 	long ret = 0;
 	if (likely(this_cpu_read(pkvm_enabled))) {
-		ret = kvm_hypercall2(PKVM_HC_IOMMU_UPDATE_CE, reg_phys, (unsigned long)param);
+		ret = kvm_hypercall2(PKVM_HC_IOMMU_UPDATE_CE,
+				(unsigned long)param, (unsigned long)donation);
 	}
 
 	return ret;
 }
-
-#define PKVM_MAX_IOMMU_PAGE_DONATION	16
-/*
- * For managing IOMMU page tables, pkvm would need free pages and host
- * donates the pages as needed. This avoids static allocation of pages
- * in pkvm during boot. map and unmap hypercalls use this structure as
- * a two-way communication mechanism to manage page donation. Host
- * allocates pages and updates nr_donated for the map hypercall. pkvm
- * updates nr_returned with the pages not used or freed during map/unmap
- * hypercalls.
- */
-struct pkvm_iommu_page_donation {
-	int nr_pages;
-	phys_addr_t pages[PKVM_MAX_IOMMU_PAGE_DONATION]; /* page gpa */
-};
 
 /*
  * parameters passed by host for MAP_PAGE hypercall.

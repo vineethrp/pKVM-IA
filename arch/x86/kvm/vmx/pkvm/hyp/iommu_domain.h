@@ -48,6 +48,8 @@ struct pkvm_iommu_domain *pkvm_alloc_iommu_domain(u64 pgd);
 struct pkvm_iommu_domain *pkvm_get_iommu_domain(u64 pgd);
 void pkvm_put_iommu_domain(struct pkvm_iommu_domain *iommu_domain);
 
+unsigned long pkvm_domain_update_pgd(struct pkvm_iommu_domain *domain,
+		struct pkvm_iommu_page_donation *donation, int agaw);
 int pkvm_domain_attach_iommu(struct pkvm_iommu_domain *domain, struct pkvm_iommu *iommu);
 void pkvm_domain_detach_iommu(struct pkvm_iommu_domain *domain, struct pkvm_iommu *iommu);
 

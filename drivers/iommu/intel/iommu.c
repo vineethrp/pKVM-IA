@@ -1976,12 +1976,15 @@ static void context_present_cache_flush(struct intel_iommu *iommu, u16 did,
 static long pv_update_context_entry(struct intel_iommu *iommu, struct dmar_domain *domain,
 		u8 bus, u8 devfn, struct context_entry *context)
 {
-	struct pkvm_update_ce_param param  = { 0 };
 	struct pkvm_root_entry *pv_root = iommu->pv_root_entry;
+	struct pkvm_iommu_page_donation donation = { 0 };
+	struct pkvm_update_ce_param param  = { 0 };
+	int ret = 0, i;
 
 	if (WARN_ON(!pkvm_ia_enabled()))
 		return 0;
 
+	param.reg_phys = iommu->reg_phys;
 	param.bdf = PCI_DEVID(bus, devfn);
 	param.rte = virt_to_phys(pv_root->context_ptr[bus]) | 1;
 	param.ce_lo = context->lo;
@@ -1991,7 +1994,20 @@ static long pv_update_context_entry(struct intel_iommu *iommu, struct dmar_domai
 		param.domain_gaw = domain->gaw;
 		param.iommu_superpage = domain->iommu_superpage;
 	}
-	return pkvm_update_context_entry(iommu->reg_phys, &param);
+	ret = pkvm_update_context_entry(&param, &donation);
+
+	pr_debug("%s: update_ce HC returned %d free pages\n", __func__, donation.nr_pages);
+	for (i = 0; i < donation.nr_pages; i++) {
+		iommu_free_page(phys_to_virt(donation.pages[i]));
+	}
+
+	/*
+	 * pkvm changed the pgd. Record it in the domain.
+	 */
+	if (param.pgd)
+		domain->pgd = phys_to_virt(param.pgd);
+
+	return ret;
 }
 #else
 static inline long pv_update_context_entry(struct intel_iommu *iommu, struct dmar_domain *domain,
@@ -4063,6 +4079,7 @@ int prepare_domain_attach_device(struct iommu_domain *domain,
 	 * Knock out extra levels of page tables if necessary
 	 */
 	while (iommu->agaw < dmar_domain->agaw) {
+#ifndef CONFIG_PKVM_INTEL_PVIOMMU
 		struct dma_pte *pte;
 
 		pte = dmar_domain->pgd;
@@ -4070,6 +4087,7 @@ int prepare_domain_attach_device(struct iommu_domain *domain,
 			dmar_domain->pgd = phys_to_virt(dma_pte_addr(pte));
 			iommu_free_page(pte);
 		}
+#endif
 		dmar_domain->agaw--;
 	}
 

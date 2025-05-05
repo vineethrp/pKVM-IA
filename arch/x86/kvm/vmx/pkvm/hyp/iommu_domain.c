@@ -144,6 +144,24 @@ void pkvm_domain_detach_iommu(struct pkvm_iommu_domain *domain, struct pkvm_iomm
 	pkvm_spin_unlock(&iommu->lock);
 }
 
+unsigned long pkvm_domain_update_pgd(struct pkvm_iommu_domain *domain,
+		struct pkvm_iommu_page_donation *donation,
+		int agaw)
+{
+	u64 pgd = domain->pgd;
+	while (agaw < domain->agaw) {
+		struct dma_pte *pte;
+		pte = pkvm_phys_to_virt(pgd);
+		if (dma_pte_present(pte)) {
+			__pkvm_hyp_donate_host(pgd, PAGE_SIZE);
+			donation->pages[donation->nr_pages++] = pgd;
+			pgd = dma_pte_addr(pte);
+		}
+		domain->agaw--;
+	}
+	return pgd;
+}
+
 void pkvm_domain_flush_iotlb_range(struct pkvm_iommu_domain *domain, unsigned long addr, int size)
 {
 	int size_order = ilog2(__roundup_pow_of_two(size >> VTD_PAGE_SHIFT));
