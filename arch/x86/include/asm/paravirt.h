@@ -609,6 +609,36 @@ static __always_inline void pv_writeq_relaxed(u64 val, volatile void __iomem *ad
 	PVOP_VCALL2(pv_ops, mmio.raw_writeq_relaxed, val, addr);
 }
 #endif
+
+static __always_inline unsigned char pv_pci_mmcfg_readb(const volatile void __iomem *addr)
+{
+	return PVOP_CALL1(unsigned char, pv_ops, mmio.pci_mmcfg_readb, addr);
+}
+
+static __always_inline unsigned short pv_pci_mmcfg_readw(const volatile void __iomem *addr)
+{
+	return PVOP_CALL1(unsigned short, pv_ops, mmio.pci_mmcfg_readw, addr);
+}
+
+static __always_inline unsigned int pv_pci_mmcfg_readl(const volatile void __iomem *addr)
+{
+	return PVOP_CALL1(unsigned int, pv_ops, mmio.pci_mmcfg_readl, addr);
+}
+
+static __always_inline void pv_pci_mmcfg_writeb(unsigned char val, volatile void __iomem *addr)
+{
+	PVOP_VCALL2(pv_ops, mmio.pci_mmcfg_writeb, val, addr);
+}
+
+static __always_inline void pv_pci_mmcfg_writew(unsigned short val, volatile void __iomem *addr)
+{
+	PVOP_VCALL2(pv_ops, mmio.pci_mmcfg_writew, val, addr);
+}
+
+static __always_inline void pv_pci_mmcfg_writel(unsigned int val, volatile void __iomem *addr)
+{
+	PVOP_VCALL2(pv_ops, mmio.pci_mmcfg_writel, val, addr);
+}
 #else  /* __ASSEMBLER__ */
 
 #ifdef CONFIG_X86_64
