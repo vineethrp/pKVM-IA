@@ -82,6 +82,10 @@ MODULE_AUTHOR("Qumranet");
 MODULE_DESCRIPTION("KVM support for VMX (Intel VT-x) extensions");
 MODULE_LICENSE("GPL");
 
+bool __read_mostly enable_mbec = 1;
+
+#ifndef __PKVM_HYP__
+
 #ifdef MODULE
 static const struct x86_cpu_id vmx_cpu_id[] = {
 	X86_MATCH_FEATURE(X86_FEATURE_VMX, NULL),
@@ -118,7 +122,6 @@ module_param(emulate_invalid_guest_state, bool, 0444);
 static bool __read_mostly fasteoi = 1;
 module_param(fasteoi, bool, 0444);
 
-bool __read_mostly enable_mbec = 1;
 module_param_named(mbec, enable_mbec, bool, 0444);
 
 module_param(enable_apicv, bool, 0444);
@@ -533,6 +536,7 @@ static void vmx_update_fb_clear_dis(struct kvm_vcpu *vcpu, struct vcpu_vmx *vmx)
 static u32 vmx_segment_access_rights(struct kvm_segment *var);
 
 void vmx_vmexit(void);
+#endif /* !__PKVM_HYP__ */
 
 #define vmx_insn_failed(fmt...)		\
 do {					\
@@ -587,6 +591,7 @@ noinline void invept_error(unsigned long ext, u64 eptp)
 	vmx_insn_failed("invept failed: ext=0x%lx eptp=%llx\n", ext, eptp);
 }
 
+#ifndef __PKVM_HYP__
 DEFINE_PER_CPU(struct vmcs *, current_vmcs);
 /*
  * We maintain a per-CPU linked-list of VMCS loaded on that CPU. This is needed
@@ -598,8 +603,10 @@ static DECLARE_BITMAP(vmx_vpid_bitmap, VMX_NR_VPIDS);
 static DEFINE_SPINLOCK(vmx_vpid_lock);
 
 struct vmcs_config vmcs_config __ro_after_init;
+#endif /* !__PKVM_HYP__ */
 struct vmx_capability vmx_capability __ro_after_init;
 
+#ifndef __PKVM_HYP__
 #define VMX_SEGMENT_FIELD(seg)					\
 	[VCPU_SREG_##seg] = {                                   \
 		.selector = GUEST_##seg##_SELECTOR,		\
@@ -1635,23 +1642,32 @@ bool vmx_emulation_required(struct kvm_vcpu *vcpu)
 	return emulate_invalid_guest_state && !vmx_guest_state_valid(vcpu);
 }
 
+#endif /* !__PKVM_HYP__ */
+
 unsigned long vmx_get_rflags(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
-	unsigned long rflags, save_rflags;
+	unsigned long rflags;
+#ifndef __PKVM_HYP__
+	unsigned long save_rflags;
+#endif
 
 	if (!kvm_register_is_available(vcpu, VCPU_REG_RFLAGS)) {
 		kvm_register_mark_available(vcpu, VCPU_REG_RFLAGS);
 		rflags = vmcs_readl(GUEST_RFLAGS);
+#ifndef __PKVM_HYP__
 		if (vmx->rmode.vm86_active) {
 			rflags &= RMODE_GUEST_OWNED_EFLAGS_BITS;
 			save_rflags = vmx->rmode.save_rflags;
 			rflags |= save_rflags & ~RMODE_GUEST_OWNED_EFLAGS_BITS;
 		}
+#endif
 		vmx->rflags = rflags;
 	}
 	return vmx->rflags;
 }
+
+#ifndef __PKVM_HYP__
 
 void vmx_set_rflags(struct kvm_vcpu *vcpu, unsigned long rflags)
 {
@@ -1687,6 +1703,8 @@ bool vmx_get_if_flag(struct kvm_vcpu *vcpu)
 	return vmx_get_rflags(vcpu) & X86_EFLAGS_IF;
 }
 
+#endif /* !__PKVM_HYP__ */
+
 u32 vmx_get_interrupt_shadow(struct kvm_vcpu *vcpu)
 {
 	u32 interruptibility = vmcs_read32(GUEST_INTERRUPTIBILITY_INFO);
@@ -1699,6 +1717,8 @@ u32 vmx_get_interrupt_shadow(struct kvm_vcpu *vcpu)
 
 	return ret;
 }
+
+#ifndef __PKVM_HYP__
 
 void vmx_set_interrupt_shadow(struct kvm_vcpu *vcpu, int mask)
 {
@@ -1916,6 +1936,7 @@ int vmx_skip_emulated_instruction(struct kvm_vcpu *vcpu)
 	vmx_update_emulated_instruction(vcpu);
 	return skip_emulated_instruction(vcpu);
 }
+#endif /* !__PKVM_HYP__ */
 
 static void vmx_clear_hlt(struct kvm_vcpu *vcpu)
 {
@@ -1971,6 +1992,7 @@ void vmx_inject_exception(struct kvm_vcpu *vcpu)
 		intr_info |= INTR_INFO_DELIVER_CODE_MASK;
 	}
 
+#ifndef __PKVM_HYP__
 	if (vmx->rmode.vm86_active) {
 		int inc_eip = 0;
 		if (kvm_exception_is_soft(ex->vector))
@@ -1978,6 +2000,7 @@ void vmx_inject_exception(struct kvm_vcpu *vcpu)
 		kvm_inject_realmode_interrupt(vcpu, ex->vector, inc_eip);
 		return;
 	}
+#endif
 
 	WARN_ON_ONCE(vmx->vt.emulation_required);
 
@@ -1993,6 +2016,7 @@ void vmx_inject_exception(struct kvm_vcpu *vcpu)
 	vmx_clear_hlt(vcpu);
 }
 
+#ifndef __PKVM_HYP__
 static void vmx_setup_uret_msr(struct vcpu_vmx *vmx, unsigned int msr,
 			       bool load_into_hardware)
 {
@@ -8944,3 +8968,4 @@ err_l1d_flush:
 	kvm_x86_vendor_exit();
 	return r;
 }
+#endif /* !__PKVM_HYP__ */
