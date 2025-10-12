@@ -8,6 +8,8 @@
 #include "pkvm_constants.h"
 #include "vmx.h"
 
+extern u64 x86_pred_cmd;
+
 static int __init early_pkvm_parse_cmdline(char *buf)
 {
 	return kstrtobool(buf, &enable_pkvm);
@@ -82,6 +84,7 @@ static __init void pkvm_setup_syms(void)
 	pkvm_sym(fpu_kernel_cfg) = fpu_kernel_cfg;
 	pkvm_sym(fpu_user_cfg) = fpu_user_cfg;
 	pkvm_sym(guest_default_cfg) = guest_default_cfg;
+	pkvm_sym(x86_pred_cmd) = x86_pred_cmd;
 }
 
 static __init int pkvm_setup_host_vmcs_config(void)
