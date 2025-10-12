@@ -84,6 +84,7 @@ u32 xstate_required_size(u64 xstate_bv, bool compacted)
 
 	return ret;
 }
+#endif /* !__PKVM_HYP__ */
 
 struct kvm_cpuid_entry2 *kvm_find_cpuid_entry2(
 	struct kvm_cpuid_entry2 *entries, int nent, u32 function, u64 index)
@@ -137,6 +138,7 @@ struct kvm_cpuid_entry2 *kvm_find_cpuid_entry2(
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_find_cpuid_entry2);
 
+#ifndef __PKVM_HYP__
 static int kvm_check_cpuid(struct kvm_vcpu *vcpu)
 {
 	struct kvm_cpuid_entry2 *best;
@@ -482,6 +484,7 @@ int cpuid_query_maxphyaddr(struct kvm_vcpu *vcpu)
 not_found:
 	return 36;
 }
+#endif /* !__PKVM_HYP__ */
 
 int cpuid_query_maxguestphyaddr(struct kvm_vcpu *vcpu)
 {
@@ -507,6 +510,7 @@ u64 kvm_vcpu_reserved_gpa_bits_raw(struct kvm_vcpu *vcpu)
 	return rsvd_bits(cpuid_maxphyaddr(vcpu), 63);
 }
 
+#ifndef __PKVM_HYP__
 static int kvm_set_cpuid(struct kvm_vcpu *vcpu, struct kvm_cpuid_entry2 *e2,
                         int nent)
 {
