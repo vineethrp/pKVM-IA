@@ -29,6 +29,10 @@
 #include "pmu.h"
 #include "xen.h"
 
+#ifdef __PKVM_HYP__
+#include <asm/kvm_pkvm.h>
+#endif
+
 /*
  * Unlike "struct cpuinfo_x86.x86_capability", kvm_cpu_caps doesn't need to be
  * aligned to sizeof(unsigned long) because it's not accessed via bitops.
@@ -59,7 +63,6 @@ void __init kvm_init_xstate_sizes(void)
 	}
 }
 
-#ifndef __PKVM_HYP__
 u32 xstate_required_size(u64 xstate_bv, bool compacted)
 {
 	u32 ret = XSAVE_HDR_SIZE + XSAVE_HDR_OFFSET;
@@ -84,7 +87,6 @@ u32 xstate_required_size(u64 xstate_bv, bool compacted)
 
 	return ret;
 }
-#endif /* !__PKVM_HYP__ */
 
 struct kvm_cpuid_entry2 *kvm_find_cpuid_entry2(
 	struct kvm_cpuid_entry2 *entries, int nent, u32 function, u64 index)
@@ -138,7 +140,6 @@ struct kvm_cpuid_entry2 *kvm_find_cpuid_entry2(
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_find_cpuid_entry2);
 
-#ifndef __PKVM_HYP__
 static int kvm_check_cpuid(struct kvm_vcpu *vcpu)
 {
 	struct kvm_cpuid_entry2 *best;
@@ -156,6 +157,14 @@ static int kvm_check_cpuid(struct kvm_vcpu *vcpu)
 			return -EINVAL;
 	}
 
+#ifdef __PKVM_HYP__
+	/*
+	 * Exposing dynamic xfeatures to npVM is handled by the host as npVM's
+	 * fpstate is allocated and managed by the host.
+	 */
+	if (!pkvm_is_protected_vcpu(vcpu))
+		return 0;
+#endif
 	/*
 	 * Exposing dynamic xfeatures to the guest requires additional
 	 * enabling in the FPU, e.g. to expand the guest XSAVE state size.
@@ -328,7 +337,7 @@ static void kvm_update_cpuid_runtime(struct kvm_vcpu *vcpu)
 
 static bool kvm_cpuid_has_hyperv(struct kvm_vcpu *vcpu)
 {
-#ifdef CONFIG_KVM_HYPERV
+#if defined(CONFIG_KVM_HYPERV) && !defined(__PKVM_HYP__)
 	struct kvm_cpuid_entry2 *entry;
 
 	entry = kvm_find_cpuid_entry(vcpu, HYPERV_CPUID_INTERFACE);
@@ -377,8 +386,10 @@ static int cpuid_func_emulated(struct kvm_cpuid_entry2 *entry, u32 func,
 
 void kvm_vcpu_after_set_cpuid(struct kvm_vcpu *vcpu)
 {
+#ifndef __PKVM_HYP__
 	struct kvm_lapic *apic = vcpu->arch.apic;
 	struct kvm_cpuid_entry2 *best;
+#endif
 	struct kvm_cpuid_entry2 *entry;
 	bool allow_gbpages;
 	int i;
@@ -431,6 +442,7 @@ void kvm_vcpu_after_set_cpuid(struct kvm_vcpu *vcpu)
 				      guest_cpu_cap_has(vcpu, X86_FEATURE_GBPAGES);
 	guest_cpu_cap_change(vcpu, X86_FEATURE_GBPAGES, allow_gbpages);
 
+#ifndef __PKVM_HYP__
 	best = kvm_find_cpuid_entry(vcpu, 1);
 	if (best && apic) {
 		if (cpuid_entry_has(best, X86_FEATURE_TSC_DEADLINE_TIMER))
@@ -440,6 +452,7 @@ void kvm_vcpu_after_set_cpuid(struct kvm_vcpu *vcpu)
 
 		kvm_apic_set_version(vcpu);
 	}
+#endif
 
 	vcpu->arch.guest_supported_xcr0 = cpuid_get_supported_xcr0(vcpu);
 	vcpu->arch.guest_supported_xss = cpuid_get_supported_xss(vcpu);
@@ -450,23 +463,29 @@ void kvm_vcpu_after_set_cpuid(struct kvm_vcpu *vcpu)
 	vcpu->arch.maxphyaddr = cpuid_query_maxphyaddr(vcpu);
 	vcpu->arch.reserved_gpa_bits = kvm_vcpu_reserved_gpa_bits_raw(vcpu);
 
+#ifndef __PKVM_HYP__
 	kvm_pmu_refresh(vcpu);
+#endif
 
 #define __kvm_cpu_cap_has(UNUSED_, f) kvm_cpu_cap_has(f)
 	vcpu->arch.cr4_guest_rsvd_bits = __cr4_reserved_bits(__kvm_cpu_cap_has, UNUSED_) |
 					 __cr4_reserved_bits(guest_cpu_cap_has, vcpu);
 #undef __kvm_cpu_cap_has
 
+#ifndef __PKVM_HYP__
 	kvm_hv_set_cpuid(vcpu, kvm_cpuid_has_hyperv(vcpu));
+#endif
 
 	/* Invoke the vendor callback only after the above state is updated. */
 	kvm_x86_call(vcpu_after_set_cpuid)(vcpu);
 
+#ifndef __PKVM_HYP__
 	/*
 	 * Except for the MMU, which needs to do its thing any vendor specific
 	 * adjustments to the reserved GPA bits.
 	 */
 	kvm_mmu_after_set_cpuid(vcpu);
+#endif
 
 	kvm_make_request(KVM_REQ_RECALC_INTERCEPTS, vcpu);
 }
@@ -484,7 +503,6 @@ int cpuid_query_maxphyaddr(struct kvm_vcpu *vcpu)
 not_found:
 	return 36;
 }
-#endif /* !__PKVM_HYP__ */
 
 int cpuid_query_maxguestphyaddr(struct kvm_vcpu *vcpu)
 {
@@ -513,6 +531,9 @@ u64 kvm_vcpu_reserved_gpa_bits_raw(struct kvm_vcpu *vcpu)
 #ifndef __PKVM_HYP__
 static int kvm_set_cpuid(struct kvm_vcpu *vcpu, struct kvm_cpuid_entry2 *e2,
                         int nent)
+#else
+int kvm_set_cpuid(struct kvm_vcpu *vcpu, struct kvm_cpuid_entry2 *e2, int nent)
+#endif
 {
 	u32 vcpu_caps[NR_KVM_CPU_CAPS];
 	int r;
@@ -580,7 +601,9 @@ static int kvm_set_cpuid(struct kvm_vcpu *vcpu, struct kvm_cpuid_entry2 *e2,
 	kvm_vcpu_after_set_cpuid(vcpu);
 
 success:
+#ifndef __PKVM_HYP__
 	kvfree(e2);
+#endif
 	return 0;
 
 err:
@@ -590,6 +613,7 @@ err:
 	return r;
 }
 
+#ifndef __PKVM_HYP__
 /* when an old userspace process fills a new kernel module */
 int kvm_vcpu_ioctl_set_cpuid(struct kvm_vcpu *vcpu,
 			     struct kvm_cpuid *cpuid,
@@ -1374,6 +1398,7 @@ static struct kvm_cpuid_entry2 *do_host_cpuid(struct kvm_cpuid_array *array,
 
 	return entry;
 }
+#endif /* !__PKVM_HYP__ */
 
 static int cpuid_func_emulated(struct kvm_cpuid_entry2 *entry, u32 func,
 			       bool include_partially_emulated)
@@ -1412,6 +1437,7 @@ static int cpuid_func_emulated(struct kvm_cpuid_entry2 *entry, u32 func,
 	}
 }
 
+#ifndef __PKVM_HYP__
 static int __do_cpuid_func_emulated(struct kvm_cpuid_array *array, u32 func)
 {
 	if (array->nent >= array->maxnent)
