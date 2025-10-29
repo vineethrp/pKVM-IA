@@ -915,7 +915,6 @@ static void kvm_multiple_exception(struct kvm_vcpu *vcpu, unsigned int nr,
 	}
 }
 
-#ifndef __PKVM_HYP__
 void kvm_queue_exception(struct kvm_vcpu *vcpu, unsigned nr)
 {
 	kvm_multiple_exception(vcpu, nr, false, 0, false, 0);
@@ -929,8 +928,6 @@ void kvm_queue_exception_p(struct kvm_vcpu *vcpu, unsigned nr,
 	kvm_multiple_exception(vcpu, nr, false, 0, true, payload);
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_queue_exception_p);
-
-#endif /* !__PKVM_HYP__ */
 
 static void kvm_queue_exception_e_p(struct kvm_vcpu *vcpu, unsigned nr,
 				    u32 error_code, unsigned long payload)
@@ -989,7 +986,6 @@ static int complete_emulated_insn_gp(struct kvm_vcpu *vcpu, int err)
 	return kvm_emulate_instruction(vcpu, EMULTYPE_NO_DECODE | EMULTYPE_SKIP |
 				       EMULTYPE_COMPLETE_USER_EXIT);
 }
-
 #endif /* !__PKVM_HYP__ */
 
 void kvm_inject_page_fault(struct kvm_vcpu *vcpu, struct x86_exception *fault)
@@ -9865,13 +9861,19 @@ writeback:
 
 	return r;
 }
+#endif /* !__PKVM_HYP__ */
 
 int kvm_emulate_instruction(struct kvm_vcpu *vcpu, int emulation_type)
 {
+#ifndef __PKVM_HYP__
 	return x86_emulate_instruction(vcpu, 0, emulation_type, NULL, 0);
+#else
+	return X86EMUL_UNHANDLEABLE;
+#endif
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_instruction);
 
+#ifndef __PKVM_HYP__
 int kvm_emulate_instruction_from_buffer(struct kvm_vcpu *vcpu,
 					void *insn, int insn_len)
 {
