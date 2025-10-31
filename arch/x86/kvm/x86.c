@@ -2341,6 +2341,7 @@ int kvm_emulate_wrmsr_imm(struct kvm_vcpu *vcpu, u32 msr, int reg)
 	return __kvm_emulate_wrmsr(vcpu, msr, kvm_register_read(vcpu, reg));
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_wrmsr_imm);
+#endif /* !__PKVM_HYP__ */
 
 int kvm_emulate_as_nop(struct kvm_vcpu *vcpu)
 {
@@ -2354,6 +2355,7 @@ int kvm_emulate_invd(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_invd);
 
+#ifndef __PKVM_HYP__
 fastpath_t handle_fastpath_invd(struct kvm_vcpu *vcpu)
 {
 	if (!kvm_pmu_is_fastpath_emulation_allowed(vcpu))
