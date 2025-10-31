@@ -290,6 +290,7 @@ struct vcpu_vmx {
 
 #ifdef CONFIG_PKVM_INTEL
 	u32 error_code;
+	u64 exit_gpa;
 #endif
 };
 
