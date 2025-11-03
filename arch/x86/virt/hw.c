@@ -6,6 +6,7 @@
 #include <linux/list.h>
 #include <linux/percpu.h>
 
+#include <asm/kvm_host.h>
 #include <asm/perf_event.h>
 #include <asm/processor.h>
 #include <asm/virt.h>
@@ -148,6 +149,18 @@ static void x86_vmx_emergency_disable_virtualization_cpu(void)
 		return;
 
 	x86_virt_invoke_kvm_emergency_callback();
+
+	/*
+	 * The pKVM hypervisor doesn't support disabling VMX for security
+	 * reasons, and the host is deprivileged, i.e. runs in VMX non-root
+	 * mode. Executing VMXOFF here would VM-Exit to pKVM, which does not
+	 * handle EXIT_REASON_VMOFF and so would not skip the instruction,
+	 * leaving the host to re-execute VMXOFF forever. The CPU stays in VMX
+	 * non-root mode across the reboot; pKVM doesn't support warm reboots
+	 * anyway. See pkvm_disable_virtualization_cpu().
+	 */
+	if (pkvm_enabled())
+		return;
 
 	x86_vmx_disable_virtualization_cpu();
 }
