@@ -149,10 +149,10 @@ module_param(error_on_inconsistent_vmcs_config, bool, 0444);
 #ifndef __PKVM_HYP__
 static bool __read_mostly dump_invalid_vmcs = 0;
 module_param(dump_invalid_vmcs, bool, 0644);
+#endif /* !__PKVM_HYP__ */
 
 #define MSR_BITMAP_MODE_X2APIC		1
 #define MSR_BITMAP_MODE_X2APIC_APICV	2
-#endif /* !__PKVM_HYP__ */
 
 #define KVM_VMX_TSC_MULTIPLIER_MAX     0xffffffffffffffffULL
 
@@ -4486,7 +4486,6 @@ void vmx_set_intercept_for_msr(struct kvm_vcpu *vcpu, u32 msr, int type, bool se
 	}
 }
 
-#ifndef __PKVM_HYP__
 static void vmx_update_msr_bitmap_x2apic(struct kvm_vcpu *vcpu)
 {
 	/*
@@ -4546,6 +4545,7 @@ static void vmx_update_msr_bitmap_x2apic(struct kvm_vcpu *vcpu)
 	}
 }
 
+#ifndef __PKVM_HYP__
 void pt_update_intercept_for_msr(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -7304,8 +7304,6 @@ void vmx_update_cr8_intercept(struct kvm_vcpu *vcpu, int tpr, int irr)
 	vmcs_write32(TPR_THRESHOLD, tpr_threshold);
 }
 
-#ifndef __PKVM_HYP__
-
 void vmx_set_virtual_apic_mode(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -7318,7 +7316,20 @@ void vmx_set_virtual_apic_mode(struct kvm_vcpu *vcpu)
 	    !cpu_has_vmx_virtualize_x2apic_mode())
 		return;
 
+#ifndef __PKVM_HYP__
 	guard(vmx_vmcs01)(vcpu);
+#endif
+
+#ifdef __PKVM_HYP__
+	/*
+	 * Emulating xapic mode requires instruction decoding. As pVM's CPU and
+	 * memory state are isolated from the host, the host cannot decode pVM's
+	 * instruction. Not to use xapic mode for a pVM.
+	 */
+	if (pkvm_is_protected_vcpu(vcpu) &&
+	    (kvm_get_apic_mode(vcpu) == LAPIC_MODE_XAPIC))
+		return;
+#endif
 
 	sec_exec_control = secondary_exec_controls_get(vmx);
 	sec_exec_control &= ~(SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES |
@@ -7348,10 +7359,12 @@ void vmx_set_virtual_apic_mode(struct kvm_vcpu *vcpu)
 			 */
 			if (!is_guest_mode(vcpu))
 				kvm_make_request(KVM_REQ_TLB_FLUSH_CURRENT, vcpu);
+#ifndef __PKVM_HYP__
 			else if (!enable_ept)
 				vpid_sync_context(vmx->vpid);
 			else if (VALID_PAGE(vcpu->arch.root_mmu.root.hpa))
 				vmx_flush_tlb_ept_root(vcpu->arch.root_mmu.root.hpa);
+#endif
 		}
 		break;
 	case LAPIC_MODE_X2APIC:
@@ -7365,6 +7378,7 @@ void vmx_set_virtual_apic_mode(struct kvm_vcpu *vcpu)
 	vmx_update_msr_bitmap_x2apic(vcpu);
 }
 
+#ifndef __PKVM_HYP__
 void vmx_set_apic_access_page_addr(struct kvm_vcpu *vcpu)
 {
 	const gfn_t gfn = APIC_DEFAULT_PHYS_BASE >> PAGE_SHIFT;
