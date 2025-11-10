@@ -3561,7 +3561,6 @@ static void exit_lmode(struct kvm_vcpu *vcpu)
 
 #endif
 
-#ifndef __PKVM_HYP__
 void vmx_flush_tlb_all(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -3580,18 +3579,38 @@ void vmx_flush_tlb_all(struct kvm_vcpu *vcpu)
 			vpid_sync_vcpu_global();
 		} else {
 			vpid_sync_vcpu_single(vmx->vpid);
+#ifndef __PKVM_HYP__
 			vpid_sync_vcpu_single(vmx->nested.vpid02);
+#endif
 		}
 	}
 }
 
 static inline int vmx_get_current_vpid(struct kvm_vcpu *vcpu)
 {
+#ifndef __PKVM_HYP__
 	if (is_guest_mode(vcpu) && nested_cpu_has_vpid(get_vmcs12(vcpu)))
 		return nested_get_vpid02(vcpu);
+#endif
 	return to_vmx(vcpu)->vpid;
 }
 
+#ifdef __PKVM_HYP__
+static u64 construct_eptp(struct kvm_vcpu *vcpu, hpa_t root_hpa)
+{
+	union kvm_mmu_page_role role = vcpu->arch.mmu->root_role;
+	u64 eptp = root_hpa | VMX_EPTP_MT_WB;
+
+	if (WARN_ON_ONCE(role.level != 4 && role.level != 5))
+		return INVALID_PAGE;
+
+	eptp |= (role.level == 5) ? VMX_EPTP_PWL_5 : VMX_EPTP_PWL_4;
+	if (enable_ept_ad_bits && !role.ad_disabled)
+		eptp |= VMX_EPTP_AD_ENABLE_BIT;
+
+	return eptp;
+}
+#else
 static u64 construct_eptp(hpa_t root_hpa)
 {
 	u64 eptp = root_hpa | VMX_EPTP_MT_WB;
@@ -3625,6 +3644,7 @@ static void vmx_flush_tlb_ept_root(hpa_t root_hpa)
 	else
 		ept_sync_global();
 }
+#endif
 
 void vmx_flush_tlb_current(struct kvm_vcpu *vcpu)
 {
@@ -3635,10 +3655,20 @@ void vmx_flush_tlb_current(struct kvm_vcpu *vcpu)
 	if (!VALID_PAGE(root_hpa))
 		return;
 
-	if (enable_ept)
+	if (enable_ept) {
+#ifdef __PKVM_HYP__
+		u64 eptp = construct_eptp(vcpu, root_hpa);
+
+		if (VALID_PAGE(eptp))
+			ept_sync_context(eptp);
+		else
+			ept_sync_global();
+#else
 		vmx_flush_tlb_ept_root(root_hpa);
-	else
+#endif
+	} else {
 		vpid_sync_context(vmx_get_current_vpid(vcpu));
+	}
 }
 
 void vmx_flush_tlb_gva(struct kvm_vcpu *vcpu, gva_t addr)
@@ -3662,6 +3692,7 @@ void vmx_flush_tlb_guest(struct kvm_vcpu *vcpu)
 	vpid_sync_context(vmx_get_current_vpid(vcpu));
 }
 
+#ifndef __PKVM_HYP__
 void vmx_ept_load_pdptrs(struct kvm_vcpu *vcpu)
 {
 	struct kvm_mmu *mmu = vcpu->arch.walk_mmu;
@@ -3803,7 +3834,9 @@ static int vmx_get_max_ept_level(void)
 		return 5;
 	return 4;
 }
+#endif /* !__PKVM_HYP__ */
 
+#ifndef __PKVM_HYP__
 void vmx_load_mmu_pgd(struct kvm_vcpu *vcpu, hpa_t root_hpa, int root_level)
 {
 	struct kvm *kvm = vcpu->kvm;
