@@ -2186,6 +2186,7 @@ u64 vmx_get_l2_tsc_multiplier(struct kvm_vcpu *vcpu)
 
 	return kvm_caps.default_tsc_scaling_ratio;
 }
+#endif /* !__PKVM_HYP__ */
 
 void vmx_write_tsc_offset(struct kvm_vcpu *vcpu)
 {
@@ -2196,7 +2197,6 @@ void vmx_write_tsc_multiplier(struct kvm_vcpu *vcpu)
 {
 	vmcs_write64(TSC_MULTIPLIER, vcpu->arch.tsc_scaling_ratio);
 }
-#endif /* !__PKVM_HYP__ */
 
 /*
  * Userspace is allowed to set any supported IA32_FEATURE_CONTROL regardless of
