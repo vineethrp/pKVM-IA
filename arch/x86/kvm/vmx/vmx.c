@@ -7288,6 +7288,8 @@ int vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 	return ret;
 }
 
+#endif /* !__PKVM_HYP__ */
+
 void vmx_update_cr8_intercept(struct kvm_vcpu *vcpu, int tpr, int irr)
 {
 	struct vmcs12 *vmcs12 = get_vmcs12(vcpu);
@@ -7297,11 +7299,15 @@ void vmx_update_cr8_intercept(struct kvm_vcpu *vcpu, int tpr, int irr)
 		nested_cpu_has(vmcs12, CPU_BASED_TPR_SHADOW))
 		return;
 
+#ifndef __PKVM_HYP__
 	guard(vmx_vmcs01)(vcpu);
+#endif
 
 	tpr_threshold = (irr == -1 || tpr < irr) ? 0 : irr;
 	vmcs_write32(TPR_THRESHOLD, tpr_threshold);
 }
+
+#ifndef __PKVM_HYP__
 
 void vmx_set_virtual_apic_mode(struct kvm_vcpu *vcpu)
 {
