@@ -7446,6 +7446,7 @@ void vmx_set_apic_access_page_addr(struct kvm_vcpu *vcpu)
 	 */
 	read_unlock(&vcpu->kvm->mmu_lock);
 }
+#endif /* !__PKVM_HYP__ */
 
 void vmx_hwapic_isr_update(struct kvm_vcpu *vcpu, int max_isr)
 {
@@ -7460,7 +7461,9 @@ void vmx_hwapic_isr_update(struct kvm_vcpu *vcpu, int max_isr)
 	 * only if Virtual Interrupt Delivery is enabled in vmcs12, and if VID
 	 * is enabled then L2 EOIs affect L2's vAPIC, not L1's vAPIC.
 	 */
+#ifndef __PKVM_HYP__
 	guard(vmx_vmcs01)(vcpu);
+#endif
 
 	status = vmcs_read16(GUEST_INTR_STATUS);
 	old = status >> 8;
@@ -7471,6 +7474,7 @@ void vmx_hwapic_isr_update(struct kvm_vcpu *vcpu, int max_isr)
 	}
 }
 
+#ifndef __PKVM_HYP__
 static void vmx_set_rvi(int vector)
 {
 	u16 status;
