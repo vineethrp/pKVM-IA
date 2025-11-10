@@ -862,6 +862,7 @@ void vmx_emergency_disable_virtualization_cpu(void)
 			vmcs_clear(v->shadow_vmcs);
 	}
 }
+#endif /* !__PKVM_HYP__ */
 
 static void __loaded_vmcs_clear(void *arg)
 {
@@ -877,6 +878,7 @@ static void __loaded_vmcs_clear(void *arg)
 	if (loaded_vmcs->shadow_vmcs && loaded_vmcs->launched)
 		vmcs_clear(loaded_vmcs->shadow_vmcs);
 
+#ifndef __PKVM_HYP__
 	list_del(&loaded_vmcs->loaded_vmcss_on_cpu_link);
 
 	/*
@@ -887,11 +889,13 @@ static void __loaded_vmcs_clear(void *arg)
 	 * cpu's list. Pairs with the smp_rmb() in vmx_vcpu_load_vmcs().
 	 */
 	smp_wmb();
+#endif
 
 	loaded_vmcs->cpu = -1;
 	loaded_vmcs->launched = 0;
 }
 
+#ifndef __PKVM_HYP__
 static void loaded_vmcs_clear(struct loaded_vmcs *loaded_vmcs)
 {
 	int cpu = loaded_vmcs->cpu;
@@ -1654,14 +1658,29 @@ void vmx_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
 #endif
 }
 
-#ifndef __PKVM_HYP__
 void vmx_vcpu_put(struct kvm_vcpu *vcpu)
 {
+#ifndef __PKVM_HYP__
 	vmx_vcpu_pi_put(vcpu);
 
 	vmx_prepare_switch_to_host(to_vmx(vcpu));
+#else
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+
+	/*
+	 * The pKVM hypervisor lacks an smp call mechanism to notify remote CPUs
+	 * to clear VMCS when a vCPU is migrated. Therefore, VMCS clearing is
+	 * performed immediately during the vcpu_put operation.
+	 */
+	if (vmx->loaded_vmcs->cpu == -1 ||
+			WARN_ON_ONCE(vmx->loaded_vmcs->cpu != raw_smp_processor_id()))
+		return;
+
+	__loaded_vmcs_clear(vmx->loaded_vmcs);
+#endif
 }
 
+#ifndef __PKVM_HYP__
 static void vmx_switch_loaded_vmcs(struct kvm_vcpu *vcpu,
 				   struct loaded_vmcs *vmcs)
 {
