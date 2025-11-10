@@ -1769,7 +1769,6 @@ unsigned long vmx_get_rflags(struct kvm_vcpu *vcpu)
 	return vmx->rflags;
 }
 
-#ifndef __PKVM_HYP__
 void vmx_set_rflags(struct kvm_vcpu *vcpu, unsigned long rflags)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -1804,8 +1803,6 @@ bool vmx_get_if_flag(struct kvm_vcpu *vcpu)
 	return vmx_get_rflags(vcpu) & X86_EFLAGS_IF;
 }
 
-#endif /* !__PKVM_HYP__ */
-
 u32 vmx_get_interrupt_shadow(struct kvm_vcpu *vcpu)
 {
 	u32 interruptibility = vmcs_read32(GUEST_INTERRUPTIBILITY_INFO);
@@ -1820,7 +1817,6 @@ u32 vmx_get_interrupt_shadow(struct kvm_vcpu *vcpu)
 }
 
 #ifndef __PKVM_HYP__
-
 void vmx_set_interrupt_shadow(struct kvm_vcpu *vcpu, int mask)
 {
 	u32 interruptibility_old = vmcs_read32(GUEST_INTERRUPTIBILITY_INFO);
