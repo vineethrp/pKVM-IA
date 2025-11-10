@@ -21,6 +21,7 @@ PKVM_ALIAS(mem_dump_obj);
 PKVM_ALIAS(vmalloc_base);
 PKVM_ALIAS(__SCK__WARN_trap);
 PKVM_ALIAS(__SCT__WARN_trap);
+PKVM_ALIAS(get_cpu_entry_area);
 #endif
 
 #endif /* _ASM_x86_PKVM_IMAGE_VARS_H */
