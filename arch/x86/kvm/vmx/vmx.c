@@ -3692,7 +3692,6 @@ void vmx_flush_tlb_guest(struct kvm_vcpu *vcpu)
 	vpid_sync_context(vmx_get_current_vpid(vcpu));
 }
 
-#ifndef __PKVM_HYP__
 void vmx_ept_load_pdptrs(struct kvm_vcpu *vcpu)
 {
 	struct kvm_mmu *mmu = vcpu->arch.walk_mmu;
@@ -3707,7 +3706,6 @@ void vmx_ept_load_pdptrs(struct kvm_vcpu *vcpu)
 		vmcs_write64(GUEST_PDPTR3, mmu->pdptrs[3]);
 	}
 }
-#endif /* !__PKVM_HYP__ */
 
 void ept_save_pdptrs(struct kvm_vcpu *vcpu)
 {
@@ -3836,7 +3834,6 @@ static int vmx_get_max_ept_level(void)
 }
 #endif /* !__PKVM_HYP__ */
 
-#ifndef __PKVM_HYP__
 void vmx_load_mmu_pgd(struct kvm_vcpu *vcpu, hpa_t root_hpa, int root_level)
 {
 	struct kvm *kvm = vcpu->kvm;
@@ -3844,11 +3841,16 @@ void vmx_load_mmu_pgd(struct kvm_vcpu *vcpu, hpa_t root_hpa, int root_level)
 	unsigned long guest_cr3;
 
 	if (enable_ept) {
+#ifdef __PKVM_HYP__
+		KVM_MMU_WARN_ON(root_level != vcpu->arch.mmu->root_role.level);
+		vmcs_write64(EPT_POINTER, construct_eptp(vcpu, root_hpa));
+#else
 		KVM_MMU_WARN_ON(root_to_sp(root_hpa) &&
 				root_level != root_to_sp(root_hpa)->role.level);
 		vmcs_write64(EPT_POINTER, construct_eptp(root_hpa));
 
 		hv_track_root_tdp(vcpu, root_hpa);
+#endif
 
 		if (!enable_unrestricted_guest && !is_paging(vcpu))
 			guest_cr3 = to_kvm_vmx(kvm)->ept_identity_map_addr;
@@ -3865,7 +3867,6 @@ void vmx_load_mmu_pgd(struct kvm_vcpu *vcpu, hpa_t root_hpa, int root_level)
 	if (update_guest_cr3)
 		vmcs_writel(GUEST_CR3, guest_cr3);
 }
-#endif /* !__PKVM_HYP__ */
 
 bool vmx_is_valid_cr4(struct kvm_vcpu *vcpu, unsigned long cr4)
 {
