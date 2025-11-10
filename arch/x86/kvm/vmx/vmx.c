@@ -1811,7 +1811,6 @@ u32 vmx_get_interrupt_shadow(struct kvm_vcpu *vcpu)
 	return ret;
 }
 
-#ifndef __PKVM_HYP__
 void vmx_set_interrupt_shadow(struct kvm_vcpu *vcpu, int mask)
 {
 	u32 interruptibility_old = vmcs_read32(GUEST_INTERRUPTIBILITY_INFO);
@@ -1828,6 +1827,7 @@ void vmx_set_interrupt_shadow(struct kvm_vcpu *vcpu, int mask)
 		vmcs_write32(GUEST_INTERRUPTIBILITY_INFO, interruptibility);
 }
 
+#ifndef __PKVM_HYP__
 static int vmx_rtit_ctl_check(struct kvm_vcpu *vcpu, u64 data)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
