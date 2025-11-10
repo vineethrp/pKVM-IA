@@ -2822,7 +2822,6 @@ int vmx_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 	return ret;
 }
 
-#ifndef __PKVM_HYP__
 void vmx_cache_reg(struct kvm_vcpu *vcpu, enum kvm_reg reg)
 {
 	unsigned long guest_owned_bits;
@@ -2865,7 +2864,6 @@ void vmx_cache_reg(struct kvm_vcpu *vcpu, enum kvm_reg reg)
 		break;
 	}
 }
-#endif /* !__PKVM_HYP__ */
 
 /*
  * There is no X86_FEATURE for SGX yet, but anyway we need to query CPUID
@@ -3716,6 +3714,7 @@ void vmx_ept_load_pdptrs(struct kvm_vcpu *vcpu)
 		vmcs_write64(GUEST_PDPTR3, vcpu->arch.pdptrs[3]);
 	}
 }
+#endif /* !__PKVM_HYP__ */
 
 void ept_save_pdptrs(struct kvm_vcpu *vcpu)
 {
@@ -3730,6 +3729,7 @@ void ept_save_pdptrs(struct kvm_vcpu *vcpu)
 	kvm_register_mark_available(vcpu, VCPU_REG_PDPTR);
 }
 
+#ifndef __PKVM_HYP__
 #define CR3_EXITING_BITS (CPU_BASED_CR3_LOAD_EXITING | \
 			  CPU_BASED_CR3_STORE_EXITING)
 
