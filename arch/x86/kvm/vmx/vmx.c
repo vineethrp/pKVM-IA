@@ -4591,7 +4591,6 @@ static void vmx_update_msr_bitmap_x2apic(struct kvm_vcpu *vcpu)
 	}
 }
 
-#ifndef __PKVM_HYP__
 void pt_update_intercept_for_msr(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
@@ -4608,6 +4607,7 @@ void pt_update_intercept_for_msr(struct kvm_vcpu *vcpu)
 	}
 }
 
+#ifndef __PKVM_HYP__
 static void vmx_recalc_pmu_msr_intercepts(struct kvm_vcpu *vcpu)
 {
 	u64 vm_exit_controls_bits = VM_EXIT_LOAD_IA32_PERF_GLOBAL_CTRL |
@@ -4663,6 +4663,7 @@ static void vmx_recalc_pmu_msr_intercepts(struct kvm_vcpu *vcpu)
 	vmx_set_intercept_for_msr(vcpu, MSR_CORE_PERF_GLOBAL_OVF_CTRL,
 				  MSR_TYPE_RW, intercept);
 }
+#endif
 
 static void vmx_recalc_msr_intercepts(struct kvm_vcpu *vcpu)
 {
@@ -4730,7 +4731,9 @@ static void vmx_recalc_msr_intercepts(struct kvm_vcpu *vcpu)
 		vmx_set_intercept_for_msr(vcpu, MSR_IA32_S_CET, MSR_TYPE_RW, intercept);
 	}
 
+#ifndef __PKVM_HYP__
 	vmx_recalc_pmu_msr_intercepts(vcpu);
+#endif
 
 	/*
 	 * x2APIC and LBR MSR intercepts are modified on-demand and cannot be
@@ -4738,11 +4741,15 @@ static void vmx_recalc_msr_intercepts(struct kvm_vcpu *vcpu)
 	 */
 }
 
+#ifndef __PKVM_HYP__
 static void vmx_recalc_instruction_intercepts(struct kvm_vcpu *vcpu)
 {
 	exec_controls_changebit(to_vmx(vcpu), CPU_BASED_RDPMC_EXITING,
 				kvm_need_rdpmc_intercept(vcpu));
 }
+#else
+static void vmx_recalc_instruction_intercepts(struct kvm_vcpu *vcpu) {}
+#endif
 
 void vmx_recalc_intercepts(struct kvm_vcpu *vcpu)
 {
@@ -4750,6 +4757,7 @@ void vmx_recalc_intercepts(struct kvm_vcpu *vcpu)
 	vmx_recalc_msr_intercepts(vcpu);
 }
 
+#ifndef __PKVM_HYP__
 static int vmx_deliver_nested_posted_interrupt(struct kvm_vcpu *vcpu,
 						int vector)
 {
