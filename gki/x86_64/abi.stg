@@ -314284,7 +314284,7 @@ elf_symbol {
   name: "nf_nat_ipv6_register_fn"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x665087a6
+  crc: 0x1344ec4d
   type_id: 0x9e67eade
   full_name: "nf_nat_ipv6_register_fn"
 }
@@ -314293,7 +314293,7 @@ elf_symbol {
   name: "nf_nat_ipv6_unregister_fn"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x0a8b1884
+  crc: 0x37ce8b51
   type_id: 0x137f5862
   full_name: "nf_nat_ipv6_unregister_fn"
 }
@@ -318428,7 +318428,7 @@ elf_symbol {
   name: "sched_set_fifo"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xdbf8458b
+  crc: 0xdd90fb05
   type_id: 0x17de3be6
   full_name: "sched_set_fifo"
 }
