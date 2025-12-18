@@ -16,6 +16,22 @@
  */
 __visible bool virt_rebooting;
 
+/*
+ * Needed by code sharing with the KVM. As the pKVM hypervisor requires to have
+ * a second level page table to translate GPA to HPA, set tdp_enabled as true.
+ */
+bool tdp_enabled = true;
+
+/*
+ * enable_pmu and enable_mediated_pmu live in pmu.c, which the hypervisor does
+ * not build.  Define them here so the KVM sources shared with the hypervisor
+ * (cpuid.c, vmx.c) still link.  enable_pmu keeps its KVM default and is
+ * cleared by the pKVM hypervisor's hardware_setup(); the pKVM hypervisor never
+ * supports a mediated PMU, so enable_mediated_pmu stays false.
+ */
+bool enable_pmu = true;
+bool enable_mediated_pmu;
+
 struct pkvm_hyp *pkvm_hyp;
 DEFINE_PER_CPU(struct pkvm_pcpu *, phys_cpu);
 DEFINE_PER_CPU(struct kvm_vcpu *, host_vcpu);
@@ -94,19 +110,6 @@ int pkvm_x86_vendor_init(struct kvm_x86_init_ops *ops)
 		return r;
 
 	memcpy(&kvm_x86_ops, ops->runtime_ops, sizeof(kvm_x86_ops));
-
-	if (!kvm_cpu_cap_has(X86_FEATURE_XSAVES))
-		kvm_caps.supported_xss = 0;
-
-	if (!kvm_cpu_cap_has(X86_FEATURE_SHSTK) &&
-	    !kvm_cpu_cap_has(X86_FEATURE_IBT))
-		kvm_caps.supported_xss &= ~XFEATURE_MASK_CET_ALL;
-
-	if ((kvm_caps.supported_xss & XFEATURE_MASK_CET_ALL) != XFEATURE_MASK_CET_ALL) {
-		kvm_cpu_cap_clear(X86_FEATURE_SHSTK);
-		kvm_cpu_cap_clear(X86_FEATURE_IBT);
-		kvm_caps.supported_xss &= ~XFEATURE_MASK_CET_ALL;
-	}
 
 	return 0;
 }
