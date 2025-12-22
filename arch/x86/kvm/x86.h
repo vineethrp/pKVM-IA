@@ -207,6 +207,17 @@ static inline bool kvm_can_set_cpuid_and_feature_msrs(struct kvm_vcpu *vcpu)
 }
 
 /*
+ * pKVM also needs the pre-7.1 query without the nested-guest condition when
+ * deciding whether host configuration of protected vCPU state is still
+ * allowed.  pKVM doesn't support nested guests, and last_vmentry_cpu is set
+ * by the same first-entry path in both the host and hypervisor copies.
+ */
+static inline bool kvm_vcpu_has_run(struct kvm_vcpu *vcpu)
+{
+	return vcpu->arch.last_vmentry_cpu != -1;
+}
+
+/*
  * WARN if a nested VM-Enter is pending completion, and userspace hasn't gained
  * control since the nested VM-Enter was initiated (in which case, userspace
  * may have modified vCPU state to induce an architecturally invalid VM-Exit).
