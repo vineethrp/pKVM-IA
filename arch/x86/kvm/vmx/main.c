@@ -999,9 +999,11 @@ struct kvm_x86_ops vt_x86_ops __initdata = {
 
 	.set_tss_addr = vt_op(set_tss_addr),
 	.set_identity_map_addr = vt_op(set_identity_map_addr),
+#endif
 	.get_mt_mask = vmx_get_mt_mask,
 	.tdp_has_smep = vt_op(tdp_has_smep),
 
+#ifndef __PKVM_HYP__
 	.get_exit_info = vt_op(get_exit_info),
 	.get_entry_info = vt_op(get_entry_info),
 #endif
