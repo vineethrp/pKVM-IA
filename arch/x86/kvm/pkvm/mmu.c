@@ -357,7 +357,7 @@ static int host_mmu_map(unsigned long phys, unsigned long size, bool mmio)
 {
 	/* The vaddr == phys for the host MMU */
 	return pkvm_pgtable_map(&host_mmu, phys, phys, size,
-				host_mmu_pte_prot(mmio));
+				host_mmu_pte_prot(mmio), NULL);
 }
 
 static void *guest_mmu_zalloc_page(struct pkvm_memcache *mc)
@@ -477,7 +477,7 @@ int pkvm_hyp_mmu_map(unsigned long vaddr, unsigned long phys,
 		return -EINVAL;
 	vaddr &= (1ULL << boot_cpu_data.x86_virt_bits) - 1;
 
-	return pkvm_pgtable_map(&hyp_mmu, vaddr, phys, size, prot);
+	return pkvm_pgtable_map(&hyp_mmu, vaddr, phys, size, prot, NULL);
 }
 
 #ifdef CONFIG_PKVM_X86_DEBUG
@@ -701,7 +701,7 @@ void pkvm_hyp_donate_host(unsigned long phys, unsigned long size, bool clear)
 	 * behavior. So panic if it fails.
 	 */
 	BUG_ON(ret = pkvm_pgtable_map(&host_mmu, phys, phys, size,
-				      host_mmu_pte_prot(false)));
+				      host_mmu_pte_prot(false), NULL));
 
 	set_host_mem_pgstate(phys, size, PKVM_PAGE_OWNED);
 unlock:
@@ -754,7 +754,7 @@ int pkvm_hyp_donate_host_mmio_locked(unsigned long phys, unsigned long size)
 	if (ret)
 		return ret;
 
-	return pkvm_pgtable_map(&host_mmu, phys, phys, size, prot);
+	return pkvm_pgtable_map(&host_mmu, phys, phys, size, prot, NULL);
 }
 
 /**
