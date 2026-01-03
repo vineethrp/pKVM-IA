@@ -15128,8 +15128,8 @@ int pkvm_vcpu_enter_guest(struct kvm_vcpu *vcpu, bool force_immediate_exit,
 
 int pkvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 {
+	u64 nr, a0, a1, a2, a3;
 	int ret = -KVM_EPERM;
-	u64 nr;
 
 	if (!pkvm_is_protected_vcpu(vcpu))
 		return 0;
@@ -15139,9 +15139,32 @@ int pkvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 		return 1;
 	}
 
+	/*
+	 * pKVM guest hypercalls take full 64-bit register arguments regardless
+	 * of the guest's current mode, so read the raw registers rather than
+	 * the mode-masked accessors.  This deliberately differs from KVM's
+	 * __kvm_emulate_hypercall(), which truncates the arguments to 32 bits
+	 * when !is_64_bit_hypercall(): pKVM does not support 32-bit pVMs, and
+	 * pvmfw only issues hypercalls after switching to long mode.
+	 *
+	 * Reading raw is also the safer choice, as the handlers below validate
+	 * the arguments on their full 64-bit values: a stale or malformed upper
+	 * half is rejected outright rather than being silently masked away into
+	 * a plausible-looking value.
+	 */
 	nr = kvm_rax_read_raw(vcpu);
+	a0 = kvm_rbx_read_raw(vcpu);
+	a1 = kvm_rcx_read_raw(vcpu);
+	a2 = kvm_rdx_read_raw(vcpu);
+	a3 = kvm_rsi_read_raw(vcpu);
 
 	switch (nr) {
+	case PKVM_GHC_SHARE_MEM:
+		ret = pkvm_guest_share_host(vcpu, a0, a1);
+		break;
+	case PKVM_GHC_UNSHARE_MEM:
+		ret = pkvm_guest_unshare_host(vcpu, a0, a1);
+		break;
 	case PKVM_GHC_IOREAD:
 	case PKVM_GHC_IOWRITE:
 		/* Hypercall for MMIO accessing should be forwarded to the host */
