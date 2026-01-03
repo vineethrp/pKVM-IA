@@ -6288,6 +6288,12 @@ int kvm_mmu_load(struct kvm_vcpu *vcpu)
 {
 	int r;
 
+	if (enable_pkvm) {
+		vcpu->arch.mmu->root.hpa = 0;	/* fake valid hpa */
+		kvm_mmu_load_pgd(vcpu);
+		return 0;
+	}
+
 	r = mmu_topup_memory_caches(vcpu, !vcpu->arch.mmu->root_role.direct);
 	if (r)
 		goto out;
@@ -6320,6 +6326,11 @@ out:
 void kvm_mmu_unload(struct kvm_vcpu *vcpu)
 {
 	struct kvm *kvm = vcpu->kvm;
+
+	if (enable_pkvm) {
+		vcpu->arch.mmu->root.hpa = INVALID_PAGE;
+		return;
+	}
 
 	kvm_mmu_free_roots(kvm, &vcpu->arch.root_mmu, KVM_MMU_ROOTS_ALL);
 	WARN_ON_ONCE(VALID_PAGE(vcpu->arch.root_mmu.root.hpa));
