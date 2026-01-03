@@ -9635,7 +9635,16 @@ __init int vmx_hardware_setup(void)
 		allow_smaller_maxphyaddr = true;
 
 	if (!cpu_has_vmx_ept_ad_bits() || !enable_ept)
+#ifndef __PKVM_HYP__
 		enable_ept_ad_bits = 0;
+#else
+		/*
+		 * The pKVM hypervisor requires EPT A/D bits capability to
+		 * support aging of guest pages in a simple efficient way.
+		 */
+		return -EOPNOTSUPP;
+#endif
+
 	if (!cpu_has_ept_mbec() || !enable_ept)
 		enable_mbec = 0;
 
@@ -9899,6 +9908,7 @@ static void __init do_vmx_pkvm_init(void)
 		 * simply use the SW timer instead.
 		 */
 		enable_ept = true;
+		enable_ept_ad_bits = true;
 		enable_unrestricted_guest = true;
 		enable_vnmi = true;
 	}
