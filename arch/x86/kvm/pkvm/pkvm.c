@@ -779,7 +779,6 @@ static bool is_guest_vcpu_accessible(struct kvm_vcpu *vcpu, enum pkvm_hc hc)
 	case __pkvm__sync_pir_to_irr:
 	case __pkvm__write_tsc_offset:
 	case __pkvm__write_tsc_multiplier:
-	case __pkvm__load_mmu_pgd:
 	case __pkvm__setup_mce:
 	case __pkvm__vcpu_run:
 	case __pkvm__complete_emulated_msr:
@@ -817,6 +816,7 @@ static bool is_guest_vcpu_accessible(struct kvm_vcpu *vcpu, enum pkvm_hc hc)
 	case __pkvm__flush_tlb_guest:
 	case __pkvm__vcpu_after_set_cpuid:
 	case __pkvm__vcpu_add_fpstate:
+	case __pkvm__load_mmu_pgd:
 		/*
 		 * As the host needs to pre-configure the pVM's vCPU state for
 		 * booting, the protection for pVM is only enforced by the pKVM
@@ -1296,27 +1296,24 @@ static int pkvm_load_mmu_pgd(struct kvm_vcpu *vcpu, hpa_t root_hpa, int root_lev
 
 	/*
 	 * The guest CR3/PDPTR may be updated by the load_mmu_pgd. Sync the
-	 * guest CR3/PDPTR from the host for both npVMs or pVMs (if pVMs are not
-	 * starting to run yet).
+	 * guest CR3/PDPTR from the host.
 	 */
-	if (!pkvm_is_protected_vcpu(vcpu) || !kvm_vcpu_has_run(vcpu)) {
-		if (kvm_register_is_dirty(shared_vcpu, VCPU_REG_CR3)) {
-			vcpu->arch.cr3 = shared_vcpu->arch.cr3;
-			kvm_register_mark_dirty(vcpu, VCPU_REG_CR3);
-		}
+	if (kvm_register_is_dirty(shared_vcpu, VCPU_REG_CR3)) {
+		vcpu->arch.cr3 = shared_vcpu->arch.cr3;
+		kvm_register_mark_dirty(vcpu, VCPU_REG_CR3);
+	}
 
-		/*
-		 * The PDPTRs moved out of struct kvm_mmu into kvm_vcpu_arch, so they
-		 * are reachable directly through the already-shared vCPU structure;
-		 * there is no need to map the host's struct kvm_mmu any more.
-		 */
-		if (kvm_register_is_dirty(shared_vcpu, VCPU_REG_PDPTR)) {
-			vcpu->arch.pdptrs[0] = shared_vcpu->arch.pdptrs[0];
-			vcpu->arch.pdptrs[1] = shared_vcpu->arch.pdptrs[1];
-			vcpu->arch.pdptrs[2] = shared_vcpu->arch.pdptrs[2];
-			vcpu->arch.pdptrs[3] = shared_vcpu->arch.pdptrs[3];
-			kvm_register_mark_dirty(vcpu, VCPU_REG_PDPTR);
-		}
+	/*
+	 * The PDPTRs moved out of struct kvm_mmu into kvm_vcpu_arch, so they
+	 * are reachable directly through the already-shared vCPU structure;
+	 * there is no need to map the host's struct kvm_mmu any more.
+	 */
+	if (kvm_register_is_dirty(shared_vcpu, VCPU_REG_PDPTR)) {
+		vcpu->arch.pdptrs[0] = shared_vcpu->arch.pdptrs[0];
+		vcpu->arch.pdptrs[1] = shared_vcpu->arch.pdptrs[1];
+		vcpu->arch.pdptrs[2] = shared_vcpu->arch.pdptrs[2];
+		vcpu->arch.pdptrs[3] = shared_vcpu->arch.pdptrs[3];
+		kvm_register_mark_dirty(vcpu, VCPU_REG_PDPTR);
 	}
 
 	kvm_x86_call(load_mmu_pgd)(vcpu, vcpu->arch.mmu->root.hpa,
