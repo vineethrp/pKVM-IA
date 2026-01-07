@@ -266630,6 +266630,11 @@ function {
   parameter_id: 0x11c449ec
 }
 function {
+  id: 0x14ebaf11
+  return_type_id: 0x48b5725f
+  parameter_id: 0x11cffa09
+}
+function {
   id: 0x14ed7da4
   return_type_id: 0x48b5725f
   parameter_id: 0x1d44326e
@@ -291984,6 +291989,13 @@ function {
   parameter_id: 0xca4d7389
 }
 function {
+  id: 0xb66df4d5
+  return_type_id: 0x11cffa09
+  parameter_id: 0xd5df6730
+  parameter_id: 0xf1a6dfed
+  parameter_id: 0x1bf16028
+}
+function {
   id: 0xb744d281
   return_type_id: 0x3585ddda
   parameter_id: 0x12651688
@@ -292840,6 +292852,15 @@ function {
   parameter_id: 0x00defc2c
   parameter_id: 0xc9082b19
   parameter_id: 0xc9082b19
+}
+function {
+  id: 0xce108db2
+  return_type_id: 0x4585663f
+  parameter_id: 0x0258f96e
+  parameter_id: 0x11cffa09
+  parameter_id: 0x6720d32f
+  parameter_id: 0xcd84e3cd
+  parameter_id: 0x33756485
 }
 function {
   id: 0xce25f646
@@ -301785,6 +301806,15 @@ elf_symbol {
   full_name: "dev_open"
 }
 elf_symbol {
+  id: 0xf3d00c6b
+  name: "dev_pm_clear_wake_irq"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x12a5350d
+  type_id: 0x100e6fc8
+  full_name: "dev_pm_clear_wake_irq"
+}
+elf_symbol {
   id: 0xe27e32df
   name: "dev_pm_domain_attach"
   is_defined: true
@@ -301819,6 +301849,15 @@ elf_symbol {
   crc: 0xa0969fbc
   type_id: 0x100e6fc8
   full_name: "dev_pm_qos_hide_latency_tolerance"
+}
+elf_symbol {
+  id: 0xbc98390b
+  name: "dev_pm_set_dedicated_wake_irq"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x8c1bfe6b
+  type_id: 0x9c8a5e38
+  full_name: "dev_pm_set_dedicated_wake_irq"
 }
 elf_symbol {
   id: 0xb13c4e5f
@@ -303520,6 +303559,15 @@ elf_symbol {
   crc: 0xbd7804c0
   type_id: 0xbe42b117
   full_name: "dma_map_resource"
+}
+elf_symbol {
+  id: 0x13f645c1
+  name: "dma_map_sg_attrs"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x7e1d38c4
+  type_id: 0xce108db2
+  full_name: "dma_map_sg_attrs"
 }
 elf_symbol {
   id: 0xb989e3a2
@@ -311936,7 +311984,7 @@ elf_symbol {
   name: "kmem_cache_alloc_lru_noprof"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x53efff48
+  crc: 0xf1531bf3
   type_id: 0x5de26741
   full_name: "kmem_cache_alloc_lru_noprof"
 }
@@ -319465,6 +319513,24 @@ elf_symbol {
   crc: 0xe14fa299
   type_id: 0xf36d75ff
   full_name: "sget_dev"
+}
+elf_symbol {
+  id: 0x4bd081f9
+  name: "sgl_alloc"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xf56a30e1
+  type_id: 0xb66df4d5
+  full_name: "sgl_alloc"
+}
+elf_symbol {
+  id: 0x04d97f2c
+  name: "sgl_free"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x1cfe60e4
+  type_id: 0x14ebaf11
+  full_name: "sgl_free"
 }
 elf_symbol {
   id: 0xe40fa478
@@ -329433,10 +329499,12 @@ interface {
   symbol_id: 0x63999db6
   symbol_id: 0xf58cd5f2
   symbol_id: 0x63b7fc82
+  symbol_id: 0xf3d00c6b
   symbol_id: 0xe27e32df
   symbol_id: 0x5647272b
   symbol_id: 0xf9527ac4
   symbol_id: 0xa7424f84
+  symbol_id: 0xbc98390b
   symbol_id: 0xb13c4e5f
   symbol_id: 0x238f99e1
   symbol_id: 0x033d3eaf
@@ -329624,6 +329692,7 @@ interface {
   symbol_id: 0xc9fc732f
   symbol_id: 0x6accd8d9
   symbol_id: 0x18b0baef
+  symbol_id: 0x13f645c1
   symbol_id: 0xb989e3a2
   symbol_id: 0xfd190cc3
   symbol_id: 0xeb70c9c5
@@ -331396,6 +331465,8 @@ interface {
   symbol_id: 0x005702f9
   symbol_id: 0x7c74f0ec
   symbol_id: 0xf023e34c
+  symbol_id: 0x4bd081f9
+  symbol_id: 0x04d97f2c
   symbol_id: 0xe40fa478
   symbol_id: 0xd3347f05
   symbol_id: 0x94f23ec7

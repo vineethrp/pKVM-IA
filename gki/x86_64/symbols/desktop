@@ -475,6 +475,8 @@
   _dev_info
   dev_kfree_skb_any_reason
   dev_kfree_skb_irq_reason
+  dev_pm_clear_wake_irq
+  dev_pm_set_dedicated_wake_irq
   devm_acpi_dev_add_driver_gpios
   __devm_add_action
   devm_alloc_etherdev_mqs
@@ -629,6 +631,7 @@
   dma_map_page_attrs
   dma_map_resource
   dma_map_sgtable
+  dma_map_sg_attrs
   dma_max_mapping_size
   dmam_pool_create
   dma_pool_alloc
@@ -2476,6 +2479,8 @@
   __sg_page_iter_next
   __sg_page_iter_start
   sg_pcopy_from_buffer
+  sgl_alloc
+  sgl_free
   shrinker_alloc
   shrinker_free
   shrinker_register
