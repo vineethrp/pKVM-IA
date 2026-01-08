@@ -2070,8 +2070,18 @@ extern phys_addr_t pkvm_mem_size;
 void __init pkvm_reserve(void);
 void pkvm_init_debugfs(void);
 void kvm_free_pkvm_memcache(struct pkvm_memcache *mc);
+
+#ifndef __PKVM_HYP__
+DECLARE_STATIC_KEY_FALSE(pkvm_enabled_key);
+
+static inline bool pkvm_enabled(void)
+{
+	return static_branch_likely(&pkvm_enabled_key);
+}
+#endif
 #else
 #define enable_pkvm		false
+#define pkvm_enabled()		false
 static inline void __init pkvm_reserve(void) {}
 #endif
 
@@ -2102,16 +2112,18 @@ static inline void __init pkvm_reserve(void) {}
 int kvm_x86_vendor_init(struct kvm_x86_init_ops *ops);
 void kvm_x86_vendor_exit(void);
 
+#ifndef __PKVM_HYP__
 #define __KVM_HAVE_ARCH_VM_ALLOC
 static inline struct kvm *kvm_arch_alloc_vm(void)
 {
-	if (enable_pkvm)
+	if (pkvm_enabled())
 		return kzalloc(kvm_x86_ops.vm_size, GFP_KERNEL_ACCOUNT);
 	return kvzalloc(kvm_x86_ops.vm_size, GFP_KERNEL_ACCOUNT);
 }
 
 #define __KVM_HAVE_ARCH_VM_FREE
 void kvm_arch_free_vm(struct kvm *kvm);
+#endif
 
 #if IS_ENABLED(CONFIG_HYPERV)
 #define __KVM_HAVE_ARCH_FLUSH_REMOTE_TLBS
