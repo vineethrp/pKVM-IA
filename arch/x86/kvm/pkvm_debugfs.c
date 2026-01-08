@@ -291,7 +291,7 @@ out_dir:
 
 void pkvm_create_vm_debugfs(struct kvm *kvm)
 {
-	if (!enable_pkvm)
+	if (!pkvm_enabled())
 		return;
 
 	debugfs_create_file("pkvm_vmexit_trace", 0444, kvm->debugfs_dentry,

@@ -7656,7 +7656,7 @@ int vmx_sync_pir_to_irr(struct kvm_vcpu *vcpu)
 	 */
 	if (!is_guest_mode(vcpu) && kvm_vcpu_apicv_active(vcpu)) {
 #ifdef CONFIG_PKVM_INTEL
-		if (!enable_pkvm)
+		if (!pkvm_enabled())
 			vmx_set_rvi(max_irr);
 		else if (max_irr != -1)
 			KVM_BUG_ON(pkvm_hypercall(sync_pir_to_irr, max_irr), vcpu->kvm);
@@ -9626,7 +9626,7 @@ static void __init do_vmx_pkvm_init(void)
 	r = vmx_pkvm_init();
 	if (r) {
 		pr_warn("pKVM init failed with error %d. Continue KVM init\n", r);
-	} else if (enable_pkvm) {
+	} else if (pkvm_enabled()) {
 		x86_ops = &pkvm_host_vt_x86_ops;
 		x86_init_ops = &pkvm_host_vt_init_ops;
 

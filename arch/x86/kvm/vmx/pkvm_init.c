@@ -1193,6 +1193,8 @@ static __init int pkvm_hyp_init(void)
 	return ret ? ret : init_ret;
 }
 
+DEFINE_STATIC_KEY_FALSE(pkvm_enabled_key);
+
 int __init vmx_pkvm_init(void)
 {
 	struct pkvm_hyp *pkvm;
@@ -1269,6 +1271,8 @@ int __init vmx_pkvm_init(void)
 	if (ret)
 		goto repriv_cpus;
 
+	static_branch_enable(&pkvm_enabled_key);
+
 	pkvm_hypercall(init_finalize);
 
 	pkvm_init_debugfs();
@@ -1285,7 +1289,6 @@ out:
 	 * free for the early_alloc.
 	 */
 	pkvm_sym(pkvm_hyp) = NULL;
-	enable_pkvm = false;
 	return ret;
 }
 
