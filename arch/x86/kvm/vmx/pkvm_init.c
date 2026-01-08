@@ -1264,6 +1264,7 @@ int __init vmx_pkvm_init(void)
 	ret = pkvm_hyp_init();
 	if (ret)
 		goto repriv_cpus;
+	static_branch_enable(&pkvm_enabled_key);
 
 	pkvm_hypercall(init_finalize);
 
