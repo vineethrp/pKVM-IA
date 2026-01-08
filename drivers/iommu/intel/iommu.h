@@ -361,7 +361,7 @@
 do {									\
 	cycles_t start_time = get_cycles();				\
 	while (1) {							\
-		sts = op(iommu->reg + offset);				\
+		sts = op(iommu, offset);				\
 		if (cond)						\
 			break;						\
 		if (DMAR_OPERATION_TIMEOUT < (get_cycles() - start_time))\
@@ -761,6 +761,30 @@ struct intel_iommu {
 	pkvm_spinlock_t lock;
 };
 #endif
+
+static inline u64 dmar_readq(struct intel_iommu *iommu,
+			     unsigned long offset)
+{
+	return readq(iommu->reg + offset);
+}
+
+static inline void dmar_writeq(struct intel_iommu *iommu,
+			       unsigned long offset, u64 val)
+{
+	writeq(val, iommu->reg + offset);
+}
+
+static inline u32 dmar_readl(struct intel_iommu *iommu,
+			     unsigned long offset)
+{
+	return readl(iommu->reg + offset);
+}
+
+static inline void dmar_writel(struct intel_iommu *iommu,
+			       unsigned long offset, u32 val)
+{
+	writel(val, iommu->reg + offset);
+}
 
 /* PCI domain-device relationship */
 struct device_domain_info {
