@@ -93,6 +93,7 @@ int __init pkvm_host_init_iommu(void);
 struct qi_desc;
 struct intel_iommu;
 struct device_domain_info;
+struct dmar_domain;
 
 int pv_qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
 		      unsigned int count, unsigned long options);
@@ -106,6 +107,8 @@ int pv_pasid_setup_fl(struct device_domain_info *info, phys_addr_t fsptptr,
 int pv_pasid_setup_sl(struct device_domain_info *info, phys_addr_t ssptptr,
 		      u8 agaw, u32 pasid, u16 did, u16 old_did);
 int pv_pasid_teardown(struct device_domain_info *info, u32 pasid);
+int pv_alloc_domain(struct device_domain_info *info, struct dmar_domain *domain);
+int pv_free_domain(struct dmar_domain *domain);
 #else /* __PKVM_HYP__ */
 
 bool is_dev_in_satc(u16 bdf);
