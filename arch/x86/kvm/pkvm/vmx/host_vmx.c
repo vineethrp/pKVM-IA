@@ -351,6 +351,9 @@ void pkvm_host_vmexit_main(struct vcpu_vmx *vmx)
 		if (handle_write_msr(vcpu) == X86EMUL_CONTINUE)
 			skip_instruction = true;
 		break;
+	case EXIT_REASON_EPT_VIOLATION:
+		pkvm_handle_host_ept_violation(vcpu);
+		break;
 	case EXIT_REASON_PREEMPTION_TIMER:
 		handle_preemption_timer(vcpu);
 		break;
