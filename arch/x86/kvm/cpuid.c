@@ -39,6 +39,7 @@ EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_cpu_caps);
 bool kvm_is_configuring_cpu_caps __read_mostly;
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_is_configuring_cpu_caps);
 
+#ifndef __PKVM_HYP__
 struct cpuid_xstate_sizes {
 	u32 eax;
 	u32 ebx;
@@ -2176,3 +2177,4 @@ int kvm_emulate_cpuid(struct kvm_vcpu *vcpu)
 	return kvm_skip_emulated_instruction(vcpu);
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_cpuid);
+#endif /* !__PKVM_HYP__ */

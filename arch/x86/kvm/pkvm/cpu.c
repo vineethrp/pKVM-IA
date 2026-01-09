@@ -43,6 +43,8 @@ int pkvm_setup_per_cpu(int cpu, unsigned long base,
 		return -EINVAL;
 	if (pcpu->cpu != cpu)
 		return -EINVAL;
+	if (vcpu->cpu != cpu)
+		return -EINVAL;
 
 #ifndef CONFIG_PKVM_X86_DEBUG
 	__per_cpu_offset[cpu] = (unsigned long)__pkvm_va(base) -
