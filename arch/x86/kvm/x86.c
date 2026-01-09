@@ -231,9 +231,7 @@ struct kvm_user_return_msrs {
 u32 __read_mostly kvm_nr_uret_msrs;
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_nr_uret_msrs);
 static u32 __read_mostly kvm_uret_msrs_list[KVM_MAX_NR_USER_RETURN_MSRS];
-#ifndef __PKVM_HYP__
 static DEFINE_PER_CPU(struct kvm_user_return_msrs, user_return_msrs);
-#endif /* !__PKVM_HYP__ */
 
 bool __read_mostly allow_smaller_maxphyaddr = 0;
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(allow_smaller_maxphyaddr);
@@ -655,8 +653,7 @@ int kvm_find_user_return_msr(u32 msr)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_find_user_return_msr);
 
-#ifndef __PKVM_HYP__
-static void kvm_user_return_msr_cpu_online(void)
+void kvm_user_return_msr_cpu_online(void)
 {
 	struct kvm_user_return_msrs *msrs = this_cpu_ptr(&user_return_msrs);
 	u64 value;
@@ -669,6 +666,7 @@ static void kvm_user_return_msr_cpu_online(void)
 	}
 }
 
+#ifndef __PKVM_HYP__
 static void kvm_user_return_register_notifier(struct kvm_user_return_msrs *msrs)
 {
 	if (!msrs->registered) {
