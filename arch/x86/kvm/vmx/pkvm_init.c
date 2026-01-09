@@ -6,6 +6,7 @@
 #include <linux/extable.h>
 #include "pkvm_constants.h"
 #include "vmx.h"
+#include "pkvm/pkvm_iommu.h"
 
 extern u64 x86_pred_cmd;
 
@@ -1259,6 +1260,10 @@ int __init vmx_pkvm_init(void)
 		pr_cont("reboot with kvm-intel.pkvm_relax_cpu_bugs=false\n");
 	}
 
+	ret = pkvm_host_prepare_iommu();
+	if (ret)
+		goto out;
+
 	pkvm_sym(init_ops) = pkvm_sym(pkvm_vmx_init_ops);
 
 	ret = pkvm_host_deprivilege_cpus(pkvm);
@@ -1271,6 +1276,12 @@ int __init vmx_pkvm_init(void)
 
 	static_branch_enable(&pkvm_enabled_key);
 
+	ret = pkvm_host_init_iommu();
+	if (ret) {
+		static_branch_disable(&pkvm_enabled_key);
+		goto repriv_cpus;
+	}
+
 	pkvm_hypercall(init_finalize);
 
 	pkvm_init_debugfs();
@@ -1280,7 +1291,18 @@ int __init vmx_pkvm_init(void)
 
 repriv_cpus:
 	pkvm_host_reprivilege_cpus();
+
 out:
+	/*
+	 * Try enabling iommu on initialization failure to let the
+	 * system boot normally without pKVM. Try iommu init even if
+	 * we tried it while deprivileged and failed there. Host driver
+	 * uninitializes iommu on any failure, so retrying with cpus
+	 * reprivileged should be okay and may succeed if the previous
+	 * failure was due to pKVM.
+	 */
+	pkvm_host_init_iommu();
+
 	/*
 	 * As the reserved memory at the pkvm_mem_base will not be
 	 * released back to the host, no need to de-initialize or
