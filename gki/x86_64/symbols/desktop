@@ -22,6 +22,7 @@
   acpi_dev_gpio_irq_wake_get_by
   acpi_device_fix_up_power
   acpi_device_fix_up_power_children
+  acpi_device_fix_up_power_extended
   acpi_device_get_match_data
   acpi_device_hid
   acpi_device_set_power
@@ -481,6 +482,7 @@
   __devm_add_action
   devm_alloc_etherdev_mqs
   devm_backlight_device_register
+  devm_blk_crypto_profile_init
   devm_clk_get
   devm_clk_get_optional
   devm_clk_get_optional_enabled
@@ -630,9 +632,11 @@
   dmam_alloc_attrs
   dma_map_page_attrs
   dma_map_resource
+  dma_map_sg_attrs
   dma_map_sgtable
   dma_map_sg_attrs
   dma_max_mapping_size
+  dmam_free_coherent
   dmam_pool_create
   dma_pool_alloc
   dma_pool_create_node
@@ -1778,12 +1782,22 @@
   __mmc_claim_host
   mmc_cmdq_disable
   mmc_cmdq_enable
+  mmc_command_done
+  mmc_cqe_request_done
+  mmc_detect_change
   mmc_erase
+  mmc_gpiod_request_cd
+  mmc_gpio_get_cd
+  mmc_gpio_set_cd_wake
   mmc_hw_reset
   mmc_is_req_done
   mmc_register_driver
+  mmc_regulator_set_ocr
+  mmc_regulator_set_vqmmc2
   mmc_release_host
+  mmc_request_done
   mmc_retune_release
+  mmc_send_tuning
   mmc_set_blocklen
   mmc_set_data_timeout
   mmc_start_request
@@ -2007,6 +2021,7 @@
   pci_enable_wake
   pcie_print_link_status
   pcie_set_readrq
+  pci_find_capability
   pci_find_ext_capability
   pci_find_next_ext_capability
   pci_free_irq
@@ -2337,6 +2352,7 @@
   regulator_bulk_unregister_supply_alias
   regulator_disable
   regulator_enable
+  regulator_get_current_limit
   regulator_get_voltage
   regulator_register
   regulator_set_load
@@ -2423,6 +2439,57 @@
   sdca_lookup_functions
   sdca_lookup_interface_revision
   sdev_prefix_printk
+  sdhci_abort_tuning
+  __sdhci_add_host
+  sdhci_add_host
+  sdhci_alloc_host
+  sdhci_calc_clk
+  sdhci_cleanup_host
+  sdhci_complete_work
+  sdhci_cqe_disable
+  sdhci_cqe_enable
+  sdhci_cqe_irq
+  sdhci_data_line_cmd
+  sdhci_do_reset
+  sdhci_dumpregs
+  sdhci_enable_clk
+  sdhci_enable_preset_value
+  sdhci_enable_v4_mode
+  sdhci_end_tuning
+  sdhci_execute_tuning
+  __sdhci_finish_data_common
+  __sdhci_finish_mrq
+  sdhci_finish_mrq
+  sdhci_get_cd_nogpio
+  sdhci_get_ro
+  sdhci_get_vdd_value
+  sdhci_initialize_data
+  sdhci_mod_timer
+  sdhci_needs_reset
+  sdhci_prepare_dma
+  sdhci_present_error
+  __sdhci_read_caps
+  sdhci_remove_host
+  sdhci_request
+  sdhci_request_done_dma
+  sdhci_reset
+  sdhci_reset_tuning
+  sdhci_resume_host
+  sdhci_runtime_resume_host
+  sdhci_runtime_suspend_host
+  sdhci_send_tuning
+  sdhci_set_bus_width
+  sdhci_set_clock
+  sdhci_set_ios
+  sdhci_set_ios_common
+  sdhci_set_power
+  __sdhci_set_timeout
+  sdhci_set_uhs_signaling
+  sdhci_setup_host
+  sdhci_start_signal_voltage_switch
+  sdhci_start_tuning
+  sdhci_suspend_host
+  sdhci_thread_irq
   sdw_intel_acpi_scan
   securityfs_create_dir
   securityfs_create_file
