@@ -345,12 +345,112 @@ int pv_alloc_domain(struct device_domain_info *info, struct dmar_domain *domain)
 	return ret;
 }
 
+static phys_addr_t host_pa(void *addr)
+{
+	return __pa(addr);
+}
+
+static void *host_va(phys_addr_t phys)
+{
+	return __va(phys);
+}
+
+static int fill_domain_memcache(struct pkvm_memcache *mc, unsigned long nr_pages,
+				int nid, gfp_t gfp)
+{
+	while (mc->count < nr_pages) {
+		phys_addr_t *p = iommu_alloc_pages_node_sz(nid, gfp, SZ_4K);
+
+		if (!p)
+			return -ENOMEM;
+
+		push_pkvm_memcache(mc, p, PAGE_SIZE, host_pa);
+	}
+
+	return 0;
+}
+
+static void free_domain_memcache(struct pkvm_memcache *mc)
+{
+	while (mc->count) {
+		struct pkvm_page_range page_range;
+
+		page_range = pop_pkvm_memcache(mc, host_va);
+		iommu_free_pages(__va(page_range.addr));
+	}
+}
+
 int pv_free_domain(struct dmar_domain *domain)
 {
 	union pkvm_hc_data data_in = { 0 }, data_out;
 	struct iommu_hc_data *data = (struct iommu_hc_data *)&data_in;
+	int ret;
 
 	data->free_domain.pgd_gpa = virt_to_phys(domain->pgd);
 	data->hc_num = free_domain;;
-	return pkvm_hypercall_inout(iommu_hypercall, &data_in, &data_out);
+	ret = pkvm_hypercall_inout(iommu_hypercall, &data_in, &data_out);
+
+	free_domain_memcache(&data->free_domain.mc);
+	return ret;
+}
+
+int pv_domain_mapping(struct dmar_domain *domain, unsigned long iov_pfn,
+		      unsigned long phys_pfn, unsigned long nr_pages,
+		      int prot, int gfp)
+{
+	union pkvm_hc_data data_in = { 0 }, data_out;
+	struct iommu_hc_data *data = (struct iommu_hc_data *)&data_in;
+	int ret;
+
+	data->domain_mapping.pgd_gpa = virt_to_phys(domain->pgd);
+	data->domain_mapping.iov_pfn = iov_pfn;
+	data->domain_mapping.phys_pfn = phys_pfn;
+	data->domain_mapping.nr_pages = nr_pages;
+	data->domain_mapping.prot = prot;
+	data->hc_num = domain_mapping;
+
+	ret = pkvm_hypercall_inout(iommu_hypercall, &data_in, &data_out);
+	if (ret == -ENOMEM) {
+		ret = fill_domain_memcache(&data->domain_mapping.mc,
+					   __pkvm_pgtable_max_pages(nr_pages),
+					  domain->nid, gfp);
+		if (ret) {
+			pr_err("%s: failed to allocate memcache pages(err=%d)\n",
+			       __func__, ret);
+			return ret;
+		}
+		ret = pkvm_hypercall_inout(iommu_hypercall, &data_in, &data_out);
+	}
+	if (ret) {
+		pr_err("%s: domain map[iov_pfn: %lx, pfn: %lx, nr_pages: %lu] failed (err=%d)\n",
+		       __func__, iov_pfn, phys_pfn, nr_pages, ret);
+
+		/*
+		 * pKVM would not have drained the memcache on
+		 * hypercall failure. Free it if not empty.
+		 */
+		free_domain_memcache(&data->domain_mapping.mc);
+	}
+	domain->has_mappings = true;
+	return ret;
+}
+
+int pv_domain_unmapping(struct dmar_domain *domain, unsigned long start_pfn,
+			unsigned long last_pfn)
+{
+	union pkvm_hc_data data_in = { 0 }, data_out;
+	struct iommu_hc_data *data = (struct iommu_hc_data *)&data_in;
+	int ret;
+
+	data->domain_unmapping.pgd_gpa = virt_to_phys(domain->pgd),
+	data->domain_unmapping.start_pfn = start_pfn;
+	data->domain_unmapping.last_pfn = last_pfn;
+	data->hc_num = domain_unmapping;
+
+	ret = pkvm_hypercall_inout(iommu_hypercall, &data_in, &data_out);
+	if (ret)
+		pr_err("%s: domain unmap[start_pfn: %lx, last_pfn: %lx failed (err=%d)\n",
+		       __func__, start_pfn, last_pfn, ret);
+
+	return ret;
 }
