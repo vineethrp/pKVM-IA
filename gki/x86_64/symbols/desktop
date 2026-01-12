@@ -1141,6 +1141,7 @@
   fwnode_get_name
   fwnode_get_named_child_node
   fwnode_get_next_child_node
+  fwnode_get_parent
   fwnode_gpiod_get_index
   fwnode_graph_get_endpoint_by_id
   fwnode_graph_get_next_endpoint

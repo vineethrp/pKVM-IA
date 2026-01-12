@@ -308178,6 +308178,15 @@ elf_symbol {
   full_name: "fwnode_get_next_child_node"
 }
 elf_symbol {
+  id: 0x0648e7f7
+  name: "fwnode_get_parent"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xfccfce8f
+  type_id: 0x36e39310
+  full_name: "fwnode_get_parent"
+}
+elf_symbol {
   id: 0x02e45228
   name: "fwnode_gpiod_get_index"
   is_defined: true
@@ -330205,6 +330214,7 @@ interface {
   symbol_id: 0x11780300
   symbol_id: 0x183013c2
   symbol_id: 0x55d636ec
+  symbol_id: 0x0648e7f7
   symbol_id: 0x02e45228
   symbol_id: 0x922561b5
   symbol_id: 0x90df3dac
