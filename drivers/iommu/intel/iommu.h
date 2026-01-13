@@ -382,6 +382,16 @@ do {									\
 		cpu_relax();						\
 	}								\
 } while (0)
+#else
+#define IOMMU_WAIT_OP(iommu, offset, op, cond, sts)			\
+do {									\
+	while (1) {							\
+		sts = op(iommu->reg + offset);				\
+		if (cond)						\
+			break;						\
+		cpu_relax();						\
+	}								\
+} while (0)
 #endif /* !__PKVM_HYP__ */
 
 #define QI_LENGTH	256	/* queue length */
@@ -813,7 +823,7 @@ struct intel_iommu {
 	u64		reg_size; /* size of hw register set */
 	u64		cap;
 	u64		ecap;
-	u32		vgsts;	/* Virtual RTA register */
+	u32		vgsts; /* Virtual GSTS register */
 	int		seq_id;	/* sequence id of the iommu */
 	int		agaw; /* agaw of this iommu */
 	int		msagaw; /* max sagaw of this iommu */
