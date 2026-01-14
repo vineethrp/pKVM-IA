@@ -117,6 +117,7 @@ int __init pkvm_host_prepare_iommu(void)
 		info->cap = iommu->cap;
 		info->ecap = iommu->ecap;
 		info->segment = iommu->segment;
+		info->scalable_mode = sm_supported(iommu);
 		info->seq_id = iommu->seq_id;
 		info->agaw = iommu->agaw;
 		info->msagaw = iommu->msagaw;

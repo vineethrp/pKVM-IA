@@ -534,7 +534,11 @@ enum {
 #define VTD_FLAG_IRQ_REMAP_PRE_ENABLED	(1 << 1)
 #define VTD_FLAG_SVM_CAPABLE		(1 << 2)
 
+#ifdef __PKVM_HYP__
+#define sm_supported(iommu)	((iommu)->scalable_mode)
+#else
 #define sm_supported(iommu)	(intel_iommu_sm && ecap_smts((iommu)->ecap))
+#endif
 #define pasid_supported(iommu)	(sm_supported(iommu) &&			\
 				 ecap_pasid((iommu)->ecap))
 #ifdef __PKVM_HYP__
@@ -759,13 +763,16 @@ struct intel_iommu {
 	u64 ecap;
 	u32 vgsts;
 	u64 viqa;
+	u64 vrta;
 	u16 segment;
+	bool scalable_mode;
 	int seq_id;
 	int agaw;
 	int msagaw;
 	struct q_inval _qi;
 	struct q_inval *qi;
 	struct iommu_flush flush;
+	struct root_entry *root_entry;
 	pkvm_spinlock_t lock;
 };
 #endif
