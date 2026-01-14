@@ -19,7 +19,7 @@ unsigned int iommu_pglvl_mask;
 /* One-shot GCMD bits that have no effect when cleared. */
 #define DMAR_GCMD_ONESHOT	(DMA_GCMD_SRTP | DMA_GCMD_SIRTP)
 /* GCMD bits that may pass directly through to hardware. */
-#define DMAR_GCMD_DIRECT	(DMA_GCMD_TE | DMA_GCMD_IRE | DMA_GCMD_CFI | \
+#define DMAR_GCMD_DIRECT	(DMA_GCMD_IRE | DMA_GCMD_CFI | \
 				 DMA_GCMD_SIRTP)
 /* GCMD bits currently understood by pKVM. */
 #define DMAR_GCMD_SUPPORTED	(DMAR_GSTS_EN_BITS | DMAR_GCMD_ONESHOT)
@@ -88,21 +88,35 @@ static u32 pkvm_dmar_readl(struct intel_iommu *iommu, unsigned long offset)
 
 static int handle_gcmd_direct(struct intel_iommu *iommu, u32 bit, bool set)
 {
-	u32 gcmd = iommu->vgsts & DMAR_GSTS_EN_BITS;
+	u32 gsts = readl(iommu->reg + DMAR_GSTS_REG);
+	u32 gcmd = gsts & DMAR_GSTS_EN_BITS;
 	u32 status;
+
+	BUG_ON(gsts != iommu->vgsts);
 
 	if ((bit & DMAR_GCMD_ONESHOT) && !set)
 		return -EINVAL;
 
-	if (set)
+	if (set) {
+		if (gcmd & bit)
+			return 0;
 		gcmd |= bit;
-	else
+	} else {
+		if (!(gcmd & bit))
+			return 0;
 		gcmd &= ~bit;
+	}
 
 	writel(gcmd, iommu->reg + DMAR_GCMD_REG);
-	IOMMU_WAIT_OP(iommu, DMAR_GSTS_REG, pkvm_dmar_readl,
-		      (!!(status & bit) == set), status);
-	iommu->vgsts = (iommu->vgsts & DMAR_GCMD_ONESHOT) | gcmd;
+	if (set) {
+		IOMMU_WAIT_OP(iommu, DMAR_GSTS_REG, pkvm_dmar_readl,
+			      (status & bit), status);
+		iommu->vgsts |= bit;
+	} else {
+		IOMMU_WAIT_OP(iommu, DMAR_GSTS_REG, pkvm_dmar_readl,
+			      !(status & bit), status);
+		iommu->vgsts &= ~bit;
+	}
 
 	return 0;
 }
@@ -177,10 +191,13 @@ static int handle_gcmd_qie(struct intel_iommu *iommu, bool enable)
 
 		ret = initialize_qi(iommu);
 	} else {
-		if (!iommu->qi)
+		if (!iommu->qi) {
 			ret = handle_gcmd_direct(iommu, DMA_GCMD_QIE, false);
-		else
-			iommu->vgsts &= ~DMA_GSTS_QIES;
+		} else {
+			pkvm_warn("iommu%d: disabling QI is not allowed\n",
+				  iommu->seq_id);
+			return -EPERM;
+		}
 	}
 
 	pkvm_dbg("iommu%d: Queued invalidation %s\n", iommu->seq_id,
@@ -213,8 +230,7 @@ static int handle_gcmd_srtp(struct intel_iommu *iommu)
 	u32 gsts = readl(iommu->reg + DMAR_GSTS_REG);
 	int ret;
 
-	if (WARN_ON(gsts != iommu->vgsts))
-		iommu->vgsts = gsts;
+	BUG_ON(gsts != iommu->vgsts);
 
 	if (!iommu->vrta) {
 		pkvm_warn("iommu%d: host RTADDR_REG not set\n",
@@ -246,6 +262,35 @@ static int handle_gcmd_srtp(struct intel_iommu *iommu)
 	return 0;
 }
 
+static int handle_gcmd_te(struct intel_iommu *iommu, bool enable)
+{
+	int ret;
+
+	if (enable) {
+		if (iommu->vgsts & DMA_GSTS_TES) {
+			pkvm_err("iommu%d: TE allowed only once\n",
+				 iommu->seq_id);
+			return -EBUSY;
+		} else if (!(iommu->vgsts & DMA_GSTS_RTPS)) {
+			pkvm_err("iommu%d: TE not allowed before SRTP\n",
+				 iommu->seq_id);
+			return -EINVAL;
+		}
+
+		ret = handle_gcmd_direct(iommu, DMA_GCMD_TE, true);
+		if (ret)
+			return ret;
+
+		pkvm_dbg("iommu%d: translation enabled\n", iommu->seq_id);
+	} else {
+		pkvm_warn("iommu%d: disabling translation is not allowed\n",
+			  iommu->seq_id);
+		return -EPERM;
+	}
+
+	return 0;
+}
+
 static int handle_global_cmd(struct intel_iommu *iommu, u32 val)
 {
 	u32 changed = (iommu->vgsts & DMAR_GSTS_EN_BITS) ^ val;
@@ -273,6 +318,10 @@ static int handle_global_cmd(struct intel_iommu *iommu, u32 val)
 
 	if (changed & DMA_GCMD_SRTP)
 		return handle_gcmd_srtp(iommu);
+
+	if (changed & DMA_GCMD_TE)
+		return handle_gcmd_te(iommu, !!(val & DMA_GCMD_TE));
+
 	if (changed & ~DMAR_GCMD_DIRECT) {
 		pkvm_warn("iommu%d: direct GCMD access denied: %#x (set=%d)\n",
 			  iommu->seq_id, changed, !!(val & changed));

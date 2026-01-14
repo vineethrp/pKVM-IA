@@ -1605,8 +1605,11 @@ void qi_flush_dev_iotlb(struct intel_iommu *iommu, u16 sid, u16 pfsid,
 	if (!(iommu->gcmd & DMA_GCMD_TE))
 		return;
 #else
-	if (!(iommu->vgsts & DMA_GSTS_TES))
-		return;
+	/*
+	 * pKVM never disables translation after initialization, and this helper
+	 * must not be called before then.
+	 */
+	BUG_ON(!(iommu->vgsts & DMA_GSTS_TES));
 #endif
 
 	qi_desc_dev_iotlb(sid, pfsid, qdep, addr, mask, &desc);
@@ -1638,8 +1641,11 @@ void qi_flush_dev_iotlb_pasid(struct intel_iommu *iommu, u16 sid, u16 pfsid,
 	if (!(iommu->gcmd & DMA_GCMD_TE))
 		return;
 #else
-	if (!(iommu->vgsts & DMA_GSTS_TES))
-		return;
+	/*
+	 * pKVM never disables translation after initialization, and this helper
+	 * must not be called before then.
+	 */
+	BUG_ON(!(iommu->vgsts & DMA_GSTS_TES));
 #endif
 
 	qi_desc_dev_iotlb_pasid(sid, pfsid, pasid,
