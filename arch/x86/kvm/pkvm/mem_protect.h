@@ -80,5 +80,6 @@ int pkvm_host_unmap_mmio(unsigned long phys, unsigned long size);
 int pkvm_hyp_donate_host_mmio_locked(unsigned long phys, unsigned long size);
 int pkvm_host_share_hyp(unsigned long phys, unsigned long size);
 void pkvm_host_unshare_hyp(unsigned long phys, unsigned long size);
+int pkvm_host_donate_hyp_share_ro(unsigned long phys, unsigned long size, bool clear);
 
 #endif /* __PKVM_X86_MEM_PROTECT_H */

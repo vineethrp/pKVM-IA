@@ -536,7 +536,9 @@ void pkvm_hyp_donate_host(unsigned long phys, unsigned long size, bool clear)
 
 	pkvm_host_mmu_lock();
 
-	ret = check_host_mem_pgstates(phys, size, PKVM_ID_HYP, 1 << PKVM_PAGE_NONE);
+	ret = check_host_mem_pgstates(phys, size, PKVM_ID_HYP,
+				(1 << PKVM_PAGE_NONE) | (1 << PKVM_PAGE_SHARED_BORROWED));
+
 	if (ret)
 		goto unlock;
 
@@ -752,4 +754,58 @@ out:
 	 * hypervisor. So any error here means a pKVM bug.
 	 */
 	BUG_ON(ret);
+}
+
+/**
+ * pkvm_host_donate_hyp_share_ro() - Donate host memory to the hypervisor and
+ *				    re-map it back as read-only.
+ * @phys:	Physical base address of the memory region to donate.
+ * @size:	Size of the memory region in bytes.
+ * @clear:	If true, zero-initialize the memory region during donation.
+ *
+ * This function transfers ownership of the physical memory range [@phys, @phys + @size)
+ * from the host to the hypervisor. While the hypervisor becomes the primary owner,
+ * the memory is mapped back into the host's page tables with Read-Only (RO)
+ * permissions. This ensures the host can still read the data but is prevented
+ * from modifying it.
+ *
+ * Constraints:
+ * - @phys and @size must be PAGE_SIZE aligned.
+ * - @size must be non-zero.
+ *
+ * Return: 0 on success, negative error code on failure.
+ */
+int pkvm_host_donate_hyp_share_ro(unsigned long phys, unsigned long size, bool clear)
+{
+	int ret;
+
+	if (!PAGE_ALIGNED(phys) || !PAGE_ALIGNED(size) || size == 0)
+		return -EINVAL;
+
+	pkvm_host_mmu_lock();
+
+	ret = check_host_mem_pgstates(phys, size, PKVM_ID_HOST, 1 << PKVM_PAGE_OWNED);
+	if (ret)
+		goto unlock;
+
+	/* The vaddr == phys for the host MMU. */
+	ret = pkvm_pgtable_map(&host_mmu, phys, phys, size,
+					host_mmu.pgt_ops->calc_pte_perm(true, false, false));
+	BUG_ON(ret);
+
+	set_host_mem_pgstate(phys, size, PKVM_ID_HYP, PKVM_PAGE_SHARED_BORROWED);
+unlock:
+	pkvm_host_mmu_unlock();
+
+	if (!ret && clear) {
+		/*
+		 * No need to flush CPU cache, like what pkvm_clear_memory()
+		 * does, as the pKVM hypervisor doesn't access memory via
+		 * non-coherent DMA (actually there is no DMA in the pKVM
+		 * hypervisor).
+		 */
+		memset(__pkvm_va(phys), 0, size);
+	}
+
+	return ret;
 }
