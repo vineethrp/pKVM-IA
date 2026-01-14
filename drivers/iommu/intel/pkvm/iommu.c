@@ -20,7 +20,7 @@ unsigned int iommu_pglvl_mask;
 #define DMAR_GCMD_ONESHOT	(DMA_GCMD_SRTP | DMA_GCMD_SIRTP)
 /* GCMD bits that may pass directly through to hardware. */
 #define DMAR_GCMD_DIRECT	(DMA_GCMD_TE | DMA_GCMD_IRE | DMA_GCMD_CFI | \
-				 DMAR_GCMD_ONESHOT)
+				 DMA_GCMD_SIRTP)
 /* GCMD bits currently understood by pKVM. */
 #define DMAR_GCMD_SUPPORTED	(DMAR_GSTS_EN_BITS | DMAR_GCMD_ONESHOT)
 
@@ -188,6 +188,64 @@ static int handle_gcmd_qie(struct intel_iommu *iommu, bool enable)
 	return ret;
 }
 
+static int set_root_table(struct intel_iommu *iommu)
+{
+	int ret;
+
+	writeq(iommu->vrta, iommu->reg + DMAR_RTADDR_REG);
+	ret = handle_gcmd_direct(iommu, DMA_GCMD_SRTP, true);
+	if (ret)
+		return ret;
+
+	if (cap_esrtps(iommu->cap))
+		return 0;
+
+	iommu->flush.flush_context(iommu, 0, 0, 0, DMA_CCMD_GLOBAL_INVL);
+	if (sm_supported(iommu))
+		qi_flush_pasid_cache(iommu, 0, QI_PC_GLOBAL, 0);
+	iommu->flush.flush_iotlb(iommu, 0, 0, 0, DMA_TLB_GLOBAL_FLUSH);
+
+	return 0;
+}
+
+static int handle_gcmd_srtp(struct intel_iommu *iommu)
+{
+	u32 gsts = readl(iommu->reg + DMAR_GSTS_REG);
+	int ret;
+
+	if (WARN_ON(gsts != iommu->vgsts))
+		iommu->vgsts = gsts;
+
+	if (!iommu->vrta) {
+		pkvm_warn("iommu%d: host RTADDR_REG not set\n",
+			  iommu->seq_id);
+		return -EINVAL;
+	} else if (iommu->vgsts & DMA_GSTS_TES) {
+		pkvm_warn("iommu%d: SRTP not allowed after TE\n",
+			  iommu->seq_id);
+		return -EBUSY;
+	} else if (iommu->root_entry) {
+		pkvm_warn("iommu%d: SRTP allowed only once\n",
+			  iommu->seq_id);
+		return -EBUSY;
+	} else if (!cap_esrtps(iommu->cap) && !iommu->qi) {
+		pkvm_warn("iommu%d: QI required before SRTP\n",
+			  iommu->seq_id);
+		return -EINVAL;
+	}
+
+	/* Root-table ownership is established by a later patch. */
+	ret = set_root_table(iommu);
+	if (ret)
+		return ret;
+
+	iommu->root_entry = pkvm_host_gpa_to_virt(iommu->vrta & VTD_PAGE_MASK);
+
+	pkvm_dbg("iommu%d: root table set to %#llx\n",
+		 iommu->seq_id, iommu->vrta);
+	return 0;
+}
+
 static int handle_global_cmd(struct intel_iommu *iommu, u32 val)
 {
 	u32 changed = (iommu->vgsts & DMAR_GSTS_EN_BITS) ^ val;
@@ -213,6 +271,8 @@ static int handle_global_cmd(struct intel_iommu *iommu, u32 val)
 	if (changed & DMA_GCMD_QIE)
 		return handle_gcmd_qie(iommu, !!(val & DMA_GCMD_QIE));
 
+	if (changed & DMA_GCMD_SRTP)
+		return handle_gcmd_srtp(iommu);
 	if (changed & ~DMAR_GCMD_DIRECT) {
 		pkvm_warn("iommu%d: direct GCMD access denied: %#x (set=%d)\n",
 			  iommu->seq_id, changed, !!(val & changed));
@@ -246,6 +306,12 @@ int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 		break;
 	case DMAR_IQA_REG:
 		*val = iommu->viqa;
+		break;
+	case DMAR_RTADDR_REG:
+		*val = iommu->vrta;
+		break;
+	case DMAR_GSTS_REG:
+		*val = iommu->vgsts;
 		break;
 	default:
 		/* Registers not emulated by pKVM pass through to hardware. */
@@ -293,6 +359,23 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 			pkvm_err("iommu%d: write to IQT not allowed!\n",
 				 iommu->seq_id);
 			ret = -EPERM;
+		}
+		break;
+	case DMAR_RTADDR_REG:
+		if (sm_supported(iommu) != !!(val & DMA_RTADDR_SMT)) {
+			pkvm_err("iommu%d: RTA scalable-mode mismatch\n",
+				 iommu->seq_id);
+			ret = -EINVAL;
+		} else if (val & ~VTD_PAGE_MASK & ~DMA_RTADDR_SMT) {
+			pkvm_err("iommu%d: invalid RTA value %#llx\n",
+				 iommu->seq_id, val);
+			ret = -EINVAL;
+		} else if (iommu->vgsts & DMA_GSTS_TES) {
+			pkvm_err("iommu%d: RTA write after translation enabled\n",
+				 iommu->seq_id);
+			ret = -EBUSY;
+		} else {
+			iommu->vrta = val;
 		}
 		break;
 	default:
@@ -367,6 +450,7 @@ int __init pkvm_prepare_iommus(const struct pkvm_iommu_info *infos,
 		iommu->cap = info->cap;
 		iommu->ecap = info->ecap;
 		iommu->segment = info->segment;
+		iommu->scalable_mode = info->scalable_mode;
 		iommu->seq_id = info->seq_id;
 		iommu->agaw = info->agaw;
 		iommu->msagaw = info->msagaw;

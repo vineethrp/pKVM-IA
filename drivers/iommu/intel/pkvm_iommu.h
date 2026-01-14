@@ -22,6 +22,7 @@ struct pkvm_iommu_info {
 	u64 cap;
 	u64 ecap;
 	u16 segment;
+	bool scalable_mode;
 	int seq_id;
 	int agaw;
 	int msagaw;
