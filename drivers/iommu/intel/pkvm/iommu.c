@@ -23,7 +23,7 @@ unsigned int iommu_pglvl_mask = IOMMU_PGT_4LEVEL | IOMMU_PGT_5LEVEL;
 /* GCMD oneshot bits where unsetting the bit doesn't have an effect */
 #define DMAR_GCMD_ONESHOT	(DMA_GCMD_SRTP | DMA_GCMD_SIRTP)
 /* Mask of bits the host is allowed to access directly (passed through to hardware) */
-#define DMAR_GCMD_DIRECT	(DMA_GCMD_TE | DMA_GCMD_IRE | DMA_GCMD_CFI | DMA_GCMD_SRTP | DMA_GCMD_SIRTP)
+#define DMAR_GCMD_DIRECT	(DMA_GCMD_TE | DMA_GCMD_IRE | DMA_GCMD_CFI | DMA_GCMD_SIRTP)
 /* Mask of bits supported by pKVM */
 #define DMAR_GCMD_SUPPORTED_BITS	(DMAR_GSTS_EN_BITS | DMA_GCMD_SRTP | DMA_GCMD_SIRTP)
 
@@ -169,6 +169,44 @@ static void handle_gcmd_qie(struct intel_iommu *iommu, bool enable)
 		 enable ? "enabled" : "disabled");
 }
 
+static void set_root_table(struct intel_iommu *iommu)
+{
+	writeq(iommu->vrta, iommu->reg + DMAR_RTADDR_REG);
+	handle_gcmd_direct(iommu, DMA_GCMD_SRTP, true);
+
+	iommu->flush.flush_context(iommu, 0, 0, 0, DMA_CCMD_GLOBAL_INVL);
+	if (sm_supported(iommu))
+		qi_flush_pasid_cache(iommu, 0, QI_PC_GLOBAL, 0);
+	iommu->flush.flush_iotlb(iommu, 0, 0, 0, DMA_TLB_GLOBAL_FLUSH);
+}
+
+static void handle_gcmd_srtp(struct intel_iommu *iommu)
+{
+	u32 gsts = readl(iommu->reg + DMAR_GSTS_REG);
+
+	/* This should not happen, GCMD should not be modified beneath us */
+	if (WARN_ON(gsts != iommu->vgsts))
+		iommu->vgsts = gsts;
+
+	if (!iommu->vrta) {
+		pkvm_warn("iommu%d: host RTADDR_REG not set", iommu->seq_id);
+		return;
+	} else if (iommu->vgsts & DMA_GSTS_RTPS) {
+		pkvm_warn("iommu%d: SRTP allowed only once", iommu->seq_id);
+		return;
+	} else if (iommu->vgsts & DMA_GSTS_TES) {
+		pkvm_err("iommu%d: SRTP not allowed after TE", iommu->seq_id);
+		return;
+	}
+
+	/* TODO: Write protect Root Table page */
+	set_root_table(iommu);
+	iommu->root_entry = __pkvm_va(iommu->vrta & VTD_PAGE_MASK);
+
+	pkvm_dbg("iommu%d Set Root Table(%llx)!\n", iommu->seq_id, iommu->vrta);
+	return;
+}
+
 static void handle_global_cmd(struct intel_iommu *iommu, u32 val)
 {
 	u32 changed = (iommu->vgsts & DMAR_GSTS_EN_BITS) ^ val;
@@ -193,6 +231,11 @@ static void handle_global_cmd(struct intel_iommu *iommu, u32 val)
 
 	if (changed & DMA_GCMD_QIE) {
 		handle_gcmd_qie(iommu, !!(val & changed));
+		return;
+	}
+
+	if (changed & DMA_GCMD_SRTP) {
+		handle_gcmd_srtp(iommu);
 		return;
 	}
 
@@ -231,6 +274,12 @@ static int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 	case DMAR_IQA_REG:
 		*val = iommu->viqa;
 		break;
+	case DMAR_RTADDR_REG:
+		*val = iommu->vrta;
+		break;
+	case DMAR_GSTS_REG:
+		*val = iommu->vgsts;
+		break;
 	default:
 		/* Not emulated MMIO can directly go to hardware */
 		ret = iommu_direct_mmio_access(iommu, phys, len, val, true);
@@ -255,6 +304,8 @@ static int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 	case DMAR_CAP_REG:
 		fallthrough;
 	case DMAR_ECAP_REG:
+		fallthrough;
+	case DMAR_GSTS_REG:
 		break;
 	case DMAR_GCMD_REG:
 		handle_global_cmd(iommu, val);
@@ -266,6 +317,15 @@ static int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 			ret = -EINVAL;
 		} else {
 			iommu->viqa = val;
+		}
+		break;
+	case DMAR_RTADDR_REG:
+		if (sm_supported(iommu) && !(val & DMA_RTADDR_SMT)) {
+			pkvm_err("iommu%d: SM enabled but not set in RTA!\n",
+				 iommu->seq_id);
+			ret = -EINVAL;
+		} else {
+			iommu->vrta = val;
 		}
 		break;
 	default:
