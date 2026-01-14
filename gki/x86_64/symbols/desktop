@@ -476,8 +476,6 @@
   _dev_info
   dev_kfree_skb_any_reason
   dev_kfree_skb_irq_reason
-  dev_pm_clear_wake_irq
-  dev_pm_set_dedicated_wake_irq
   devm_acpi_dev_add_driver_gpios
   __devm_add_action
   devm_alloc_etherdev_mqs
@@ -561,10 +559,12 @@
   __devm_v4l2_sensor_clk_get
   _dev_notice
   dev_open
+  dev_pm_clear_wake_irq
   dev_pm_domain_attach
   dev_pm_domain_set
   dev_pm_qos_expose_latency_tolerance
   dev_pm_qos_hide_latency_tolerance
+  dev_pm_set_dedicated_wake_irq
   _dev_printk
   __dev_queue_xmit
   devres_add
@@ -634,7 +634,6 @@
   dma_map_resource
   dma_map_sg_attrs
   dma_map_sgtable
-  dma_map_sg_attrs
   dma_max_mapping_size
   dmam_free_coherent
   dmam_pool_create
@@ -2539,6 +2538,8 @@
   sg_free_table
   sg_init_one
   sg_init_table
+  sgl_alloc
+  sgl_free
   sg_miter_next
   sg_miter_start
   sg_miter_stop
@@ -2547,8 +2548,6 @@
   __sg_page_iter_next
   __sg_page_iter_start
   sg_pcopy_from_buffer
-  sgl_alloc
-  sgl_free
   shrinker_alloc
   shrinker_free
   shrinker_register
@@ -2900,6 +2899,7 @@
   strncmp
   strncpy
   strnlen
+  strnstr
   strpbrk
   strreplace
   strsep
