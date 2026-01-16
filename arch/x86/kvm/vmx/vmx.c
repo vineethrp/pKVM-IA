@@ -7520,7 +7520,15 @@ void noinstr vmx_update_host_rsp(struct vcpu_vmx *vmx, unsigned long host_rsp)
 		vmcs_writel(HOST_RSP, host_rsp);
 	}
 }
+#endif /* !__PKVM_HYP__ */
 
+/*
+ * Upstream commit 344ebd21f2c9 deleted vmx_spec_ctrl_restore_host(); the pKVM
+ * hypervisor now uses the RESTORE_{HOST,GUEST}_SPEC_CTRL_BODY macros directly
+ * in pkvm/vmx/host_vmentry.S.  The region is still split here so that the
+ * host-only boundary matches what the later pKVM commits expect.
+ */
+#ifndef __PKVM_HYP__
 static fastpath_t vmx_exit_handlers_fastpath(struct kvm_vcpu *vcpu,
 					     bool force_immediate_exit)
 {

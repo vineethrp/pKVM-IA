@@ -5,6 +5,8 @@
 #include <asm/asm.h>
 #include <asm/unwind_hints.h>
 #include <asm/nospec-branch.h>
+#include "kvm-asm-offsets.h"
+#include "vmenter.h"
 #include "vcpu_regs.h"
 
 /*
@@ -60,12 +62,49 @@ SYM_FUNC_START(pkvm_host_vmexit_entry)
 	xor %r14d, %r14d
 	xor %r15d, %r15d
 
+	/*
+	 * Stash the host VM's SPEC_CTRL into vmx->spec_ctrl and restore the
+	 * pKVM hypervisor's value.  Upstream KVM open codes the equivalent in
+	 * vmx/vmenter.S; vmx_spec_ctrl_restore_host() no longer exists.
+	 * Clobbers RAX, RCX, RDX, RSI and RDI.
+	 */
+	push $KVM_ENTER_SAVE_SPEC_CTRL
+	ALTERNATIVE "jmp .Lspec_ctrl_hyp_done", "", X86_FEATURE_MSR_SPEC_CTRL
+	mov WORD_SIZE*2(%_ASM_SP), %_ASM_DI
+	RESTORE_HOST_SPEC_CTRL_BODY VMX_spec_ctrl(%_ASM_DI), (%_ASM_SP), \
+				    .Lspec_ctrl_hyp_done
+.Lspec_ctrl_hyp_done:
+	/*
+	 * Halt speculation past the conditional wrmsr above.  This replaces
+	 * the barrier_nospec() that vmx_spec_ctrl_restore_host() used to do,
+	 * and mirrors what vmx/vmenter.S does on the guest VM-exit path.
+	 */
+	ALTERNATIVE_2 "", "lfence", X86_FEATURE_MSR_SPEC_CTRL, \
+		"", X86_FEATURE_KERNEL_IBRS
+
+	/* Drop the enter_flags scratch slot. */
+	add $WORD_SIZE, %_ASM_SP
+
 	/* RDI: point to vcpu_vmx */
 	mov WORD_SIZE*1(%_ASM_SP), %_ASM_DI
 
 	/* pKVM never enables interrupts */
 	call pkvm_host_vmexit_main
 
+	/*
+	 * Restore the host VM's SPEC_CTRL if it differs from the pKVM
+	 * hypervisor's.  Clobbers RAX, RCX, RDX and RDI, all of which are
+	 * reloaded from vcpu->arch.regs below.
+	 *
+	 * IMPORTANT: To avoid RSB underflow attacks and any other nastiness,
+	 * there must not be any returns or indirect branches between this code
+	 * and vmentry.
+	 */
+	ALTERNATIVE "jmp .Lspec_ctrl_done", "", X86_FEATURE_MSR_SPEC_CTRL
+	mov WORD_SIZE*1(%_ASM_SP), %_ASM_DI
+	RESTORE_GUEST_SPEC_CTRL_BODY VMX_spec_ctrl(%_ASM_DI), .Lspec_ctrl_done
+
+.Lspec_ctrl_done:
 	/*
 	 * Restore registers to reflect the vm-exit handling/emulation result
 	 * before vmresume.
