@@ -129,6 +129,7 @@ PHDRS {
 	pkvm_sym(text_start) = .;						\
 	*(PKVM_SECTION_NAME(.text))					\
 	*(PKVM_SECTION_NAME(.noinstr.text))				\
+	*(PKVM_SECTION_NAME(.init.text))				\
 	. = ALIGN(PAGE_SIZE);						\
 	pkvm_sym(text_end) = .;
 
@@ -143,6 +144,7 @@ PHDRS {
 	. = ALIGN(PAGE_SIZE);						\
 	pkvm_sym(data_start) = .;						\
 	*(PKVM_SECTION_NAME(.data))					\
+	*(PKVM_SECTION_NAME(.init.data))				\
 	. = ALIGN(PAGE_SIZE);						\
 	pkvm_sym(data_end) = .;
 
