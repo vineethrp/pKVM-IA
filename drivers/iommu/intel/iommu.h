@@ -816,6 +816,9 @@ struct intel_iommu {
 
 	struct iommu_pmu *pmu;
 };
+
+#define iommu_spin_lock(iommu)		spin_lock(&(iommu)->lock);
+#define iommu_spin_unlock(iommu)	spin_unlock(&(iommu)->lock);
 #else
 struct intel_iommu {
 	void __iomem	*reg; /* Pointer to hardware regs, virtual addr */
@@ -835,6 +838,9 @@ struct intel_iommu {
 	struct root_entry *root_entry;
 	pkvm_spinlock_t lock;
 };
+
+#define iommu_spin_lock(iommu)		pkvm_spin_lock(&(iommu)->lock);
+#define iommu_spin_unlock(iommu)	pkvm_spin_unlock(&(iommu)->lock);
 #endif /* !__PKVM_HYP__ */
 
 #ifndef __PKVM_HYP__
