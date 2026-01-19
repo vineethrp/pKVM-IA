@@ -130,6 +130,11 @@ union pkvm_hc_data {
 #define HOST_RESET_MMU				3
 #define HOST_APF_READY				4
 	} vcpu_run;
+#ifdef CONFIG_PKVM_INTEL
+	struct {
+		u64 val;
+	} iommu_mmio_read;
+#endif
 	struct {
 		bool has_intr;
 	} protected_apic_has_interrupt;
