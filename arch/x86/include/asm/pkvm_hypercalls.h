@@ -83,6 +83,11 @@ PKVM_HC_OUT(vcpu_run)
 PKVM_HC(complete_emulated_msr)
 PKVM_HC(has_wbinvd_exit)
 
+/* IOMMU hypercalls */
+PKVM_HC_OUT(iommu_mmio_read)
+PKVM_HC(iommu_mmio_write)
+PKVM_HC_INOUT(iommu_hypercall)
+
 #undef PKVM_HC
 #undef PKVM_HC_OUT
 #undef PKVM_HC_IN

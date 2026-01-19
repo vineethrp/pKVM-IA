@@ -13,6 +13,24 @@
 #include "../x86.h"
 #include "../lapic.h"
 
+static struct pkvm_iommu_ops *iommu_ops;
+
+void pkvm_register_iommu_ops(struct pkvm_iommu_ops *ops)
+{
+	BUG_ON(READ_ONCE(iommu_ops));
+	WRITE_ONCE(iommu_ops, ops);
+}
+
+/*
+ * Until the static call mechanism is available, use indirect
+ * calls. All iommu_ops callbacks are mandatory for now.
+ */
+#define pkvm_iommu_call(func)				\
+({							\
+	BUG_ON(!iommu_ops || !iommu_ops->func);			\
+	(iommu_ops->func);				\
+})
+
 /*
  * Needed by kvm_spurious_fault() which is a generic fault function for the
  * vendor operations, e.g., vmx ops or svm ops. The pKVM hypervisor doesn't
@@ -1627,6 +1645,20 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 		break;
 	case __pkvm__has_wbinvd_exit:
 		ret = kvm_x86_call(has_wbinvd_exit)();
+		break;
+	case __pkvm__iommu_mmio_read:
+		ret = pkvm_iommu_call(mmio_read)(pkvm_hc_input1(vcpu),
+						 pkvm_hc_input2(vcpu),
+						 &out.iommu_mmio_read.val);
+		break;
+	case __pkvm__iommu_mmio_write:
+		ret = pkvm_iommu_call(mmio_write)(pkvm_hc_input1(vcpu),
+						  pkvm_hc_input2(vcpu),
+						  pkvm_hc_input3(vcpu));
+		break;
+	case __pkvm__iommu_hypercall:
+		ret = pkvm_iommu_call(hypercall)(&in.iommu_hypercall.in,
+						 &out.iommu_hypercall.out);
 		break;
 	default:
 		ret = pkvm_vcpu_handle_host_hypercall(vcpu, hc, &in, &out);

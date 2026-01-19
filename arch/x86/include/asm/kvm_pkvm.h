@@ -52,6 +52,19 @@ struct pkvm_mem_info {
 	u64 prot;
 };
 
+struct pkvm_iommu_ops {
+	/* Common callbacks for all vendors implementations */
+	int (*mmio_read)(u64 phys, int len, u64 *val);
+	int (*mmio_write)(u64 phys, int len, u64 val);
+	/* domain_map() */
+	/* domain_unmap() */
+
+	/* Vendor specific hypercall handler */
+	int (*hypercall)(void *in, void *out);
+};
+
+void pkvm_register_iommu_ops(struct pkvm_iommu_ops *ops);
+
 #define TO_PKVM_HC(f)		CONCATENATE(__pkvm__, f)
 
 enum pkvm_hc {
@@ -126,6 +139,17 @@ union pkvm_hc_data {
 #define HOST_RESET_MMU				3
 #define HOST_APF_READY				4
 	} vcpu_run;
+	struct {
+		u64 val;
+	} iommu_mmio_read;
+	union {
+		struct {
+			u64 data[PKVM_HC_DATA_MAX_NUM];
+		} in;
+		struct {
+			u64 data[PKVM_HC_DATA_MAX_NUM];
+		} out;
+	} iommu_hypercall;
 	struct {
 		u64 data[PKVM_HC_DATA_MAX_NUM];
 	} raw;
