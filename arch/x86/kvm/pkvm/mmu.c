@@ -188,20 +188,23 @@ static int fix_hyp_mmu_page_refcnt(void)
 }
 
 static void set_host_mem_pgstate(unsigned long phys, unsigned long size,
-				 enum pkvm_page_state pgstate)
+				  enum pkvm_owner_id owner_id, enum pkvm_page_state pgstate)
 {
-	for_each_pkvm_page(page, phys, size)
+	for_each_pkvm_page(page, phys, size) {
 		page->host_state = pgstate;
+		page->owner_id = owner_id;
+	}
 }
 
-static int check_host_mem_pgstate(unsigned long phys, unsigned long size,
-				  enum pkvm_page_state pgstate)
+static int check_host_mem_pgstates(unsigned long phys, unsigned long size,
+				  enum pkvm_owner_id expected_owner, u64 expected_states)
 {
 	if (!is_memory_range(phys, size))
 		return -EINVAL;
 
 	for_each_pkvm_page(page, phys, size) {
-		if (page->host_state != pgstate)
+		if (!((1 << page->host_state) & expected_states) ||
+				page->owner_id != expected_owner)
 			return -EPERM;
 	}
 
@@ -234,22 +237,6 @@ static int check_page_ownership_walker(struct pkvm_pgtable_visit_ctx *ctx,
 		return -EPERM;
 
 	return 0;
-}
-
-static int check_page_owner(struct pkvm_pgtable *pgt, unsigned long vaddr,
-			    unsigned long size, const enum pkvm_owner_id expected_owner)
-{
-	struct page_ownership expected_ownership = {
-		.owner = &expected_owner,
-		.state = NULL,
-	};
-	struct pkvm_pgtable_walker walker = {
-		.cb = check_page_ownership_walker,
-		.arg = &expected_ownership,
-		.walk_flags = PKVM_PGTABLE_WALK_LEAF,
-	};
-
-	return pkvm_pgtable_walk(pgt, vaddr, size, &walker);
 }
 
 static int check_page_owner_and_state(struct pkvm_pgtable *pgt, unsigned long vaddr,
@@ -305,7 +292,7 @@ static int fix_host_mmu_pgstate_walker(struct pkvm_pgtable_visit_ctx *ctx,
 			 * it is a code bug.
 			 */
 			BUG_ON(!is_memory_range(phys, size));
-			set_host_mem_pgstate(phys, size, PKVM_PAGE_OWNED);
+			set_host_mem_pgstate(phys, size, PKVM_ID_HOST, PKVM_PAGE_OWNED);
 		}
 	} else {
 		/*
@@ -485,7 +472,7 @@ int pkvm_host_donate_hyp(unsigned long phys, unsigned long size, bool clear)
 
 	pkvm_host_mmu_lock();
 
-	ret = check_host_mem_pgstate(phys, size, PKVM_PAGE_OWNED);
+	ret = check_host_mem_pgstates(phys, size, PKVM_ID_HOST, 1 << PKVM_PAGE_OWNED);
 	if (ret)
 		goto unlock;
 
@@ -501,7 +488,7 @@ int pkvm_host_donate_hyp(unsigned long phys, unsigned long size, bool clear)
 	 */
 	BUG_ON(ret);
 
-	set_host_mem_pgstate(phys, size, PKVM_PAGE_NONE);
+	set_host_mem_pgstate(phys, size, PKVM_ID_HYP, PKVM_PAGE_NONE);
 unlock:
 	pkvm_host_mmu_unlock();
 
@@ -549,12 +536,7 @@ void pkvm_hyp_donate_host(unsigned long phys, unsigned long size, bool clear)
 
 	pkvm_host_mmu_lock();
 
-	ret = check_host_mem_pgstate(phys, size, PKVM_PAGE_NONE);
-	if (ret)
-		goto unlock;
-
-	/* The vaddr == phys for the host MMU */
-	ret = check_page_owner(&host_mmu, phys, size, PKVM_ID_HYP);
+	ret = check_host_mem_pgstates(phys, size, PKVM_ID_HYP, 1 << PKVM_PAGE_NONE);
 	if (ret)
 		goto unlock;
 
@@ -569,7 +551,7 @@ void pkvm_hyp_donate_host(unsigned long phys, unsigned long size, bool clear)
 	BUG_ON(ret = pkvm_pgtable_map(&host_mmu, phys, phys, size,
 				      host_mmu_pte_prot(false)));
 
-	set_host_mem_pgstate(phys, size, PKVM_PAGE_OWNED);
+	set_host_mem_pgstate(phys, size, PKVM_ID_HOST, PKVM_PAGE_OWNED);
 unlock:
 	pkvm_host_mmu_unlock();
 out:
@@ -742,7 +724,7 @@ void pkvm_host_unshare_hyp(unsigned long phys, unsigned long size)
 
 	pkvm_host_mmu_lock();
 
-	ret = check_host_mem_pgstate(phys, size, PKVM_PAGE_SHARED_OWNED);
+	ret = check_host_mem_pgstates(phys, size, PKVM_ID_HOST, 1 << PKVM_PAGE_SHARED_OWNED);
 	if (ret)
 		goto unlock;
 
