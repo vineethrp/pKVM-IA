@@ -22,14 +22,99 @@ unsigned int iommu_pglvl_mask = IOMMU_PGT_4LEVEL | IOMMU_PGT_5LEVEL;
 static struct intel_iommu iommus[PKVM_MAX_IOMMU_NUM];
 static int nr_iommus;
 
+static struct intel_iommu *iommu_from_phys(unsigned long phys)
+{
+	int i;
+
+	for (i = 0; i < nr_iommus; i++) {
+		struct intel_iommu *iommu = &iommus[i];
+
+		if (phys >= iommu->reg_phys && phys < (iommu->reg_phys + iommu->reg_size))
+			return iommu;
+	}
+
+	return NULL;
+}
+
+static int iommu_direct_mmio_access(struct intel_iommu *iommu, u64 phys,
+				    int len, u64 *val, bool is_read)
+{
+	unsigned long offset = phys - iommu->reg_phys;
+	void *reg = iommu->reg + offset;
+	int ret = 0;
+
+	switch (len) {
+	case 4:
+		if (is_read)
+			*val = (unsigned long)readl(reg);
+		else
+			writel((u32)*val, reg);
+		break;
+	case 8:
+		if (is_read)
+			*val = (unsigned long)readq(reg);
+		else
+			writeq((u64)*val, reg);
+		break;
+	default:
+		pkvm_err("%s: %s: unsupported len %d\n", __func__,
+			 is_read ? "read" : "write", len);
+		ret = -EINVAL;
+		break;
+	}
+	return ret;
+}
+
 static int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 {
-	return 0;
+	struct intel_iommu *iommu = iommu_from_phys(phys);
+	unsigned long offset, ret = 0;
+
+	if (!iommu)
+		return -EINVAL;
+
+	pkvm_spin_lock(&iommu->lock);
+	offset = phys - iommu->reg_phys;
+
+	switch (offset) {
+	case DMAR_CAP_REG:
+		*val = iommu->cap;
+		break;
+	case DMAR_ECAP_REG:
+		*val = iommu->ecap;
+		break;
+	default:
+		/* Not emulated MMIO can directly go to hardware */
+		ret = iommu_direct_mmio_access(iommu, phys, len, val, true);
+	}
+
+	pkvm_spin_unlock(&iommu->lock);
+	return ret;
 }
 
 static int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 {
-	return 0;
+	struct intel_iommu *iommu = iommu_from_phys(phys);
+	unsigned long offset, ret = 0;
+
+	if (!iommu)
+		return -EINVAL;
+
+	pkvm_spin_lock(&iommu->lock);
+	offset = phys - iommu->reg_phys;
+
+	switch (offset) {
+	case DMAR_CAP_REG:
+		fallthrough;
+	case DMAR_ECAP_REG:
+		break;
+	default:
+		/* Not emulated MMIO can directly go to hardware */
+		ret = iommu_direct_mmio_access(iommu, phys, len, &val, false);
+	}
+
+	pkvm_spin_unlock(&iommu->lock);
+	return ret;
 }
 
 static int pkvm_handle_iommu_hypercall(void *in, void *out)
