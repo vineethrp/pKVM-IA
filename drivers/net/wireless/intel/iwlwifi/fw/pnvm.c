@@ -289,13 +289,6 @@ static enum iwl_pnvm_source iwl_select_pnvm_source(struct iwl_trans *trans,
 	if (!intel_sku)
 		return IWL_PNVM_SOURCE_BIOS;
 
-	/* ANDROID TODO(b/476476934): Revert once fixed upstream.
-	The upstream firmware image for Intel BE211 does not include
-	the PNVM, and hence the soruce should be set to EXTERNAL*/
-	if ((trans->mac_cfg->device_family == IWL_DEVICE_FAMILY_SC) &&
-		(CSR_HW_RFID_TYPE(trans->info.hw_rf_id) == IWL_CFG_RF_TYPE_WH))
-		return IWL_PNVM_SOURCE_EXTERNAL;
-
 	/* Before those devices, PNVM didn't exist at all */
 	if (trans->mac_cfg->device_family < IWL_DEVICE_FAMILY_AX210)
 		return IWL_PNVM_SOURCE_NONE;
