@@ -4,7 +4,6 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/extable.h>
-#include <asm/pkvm_image.h>
 #include "pkvm_constants.h"
 #include "vmx.h"
 
