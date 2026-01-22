@@ -583,6 +583,40 @@ out:
 }
 
 /**
+ * pkvm_host_unmap_mmio() - Unmap MMIO pages from host mmu
+ * @phys:	Physical address of the MMIO region to unmap.
+ * @size:	Size of the MMIO region to unmap.
+ *
+ * This operation transfers ownership of the MMIO pages in range
+ * [@phys, @phys + @size) from the host to the hypervisor thereby revoking host
+ * access.
+ * @phys and @size are required to be PAGE_SIZE aligned (@size is also required
+ * to be non-zeroed value) to make sure the caller is aware that only PAGE_SIZE
+ * aligned memory range can be donated.
+ *
+ * Returns: 0 on success, or a negative error code on failure.
+ */
+int pkvm_host_unmap_mmio(unsigned long phys, unsigned long size)
+{
+	int ret = -EINVAL;
+
+	if (!PAGE_ALIGNED(phys) || !PAGE_ALIGNED(size) || size == 0)
+		return -EINVAL;
+
+	pkvm_host_mmu_lock();
+
+	if (!is_mmio_range(phys, size))
+		goto unlock;
+
+	/* The vaddr == phys for the host MMU. */
+	ret = pkvm_pgtable_set_owner(&host_mmu, phys, size, PKVM_ID_HYP);
+
+unlock:
+	pkvm_host_mmu_unlock();
+	return ret;
+}
+
+/**
  * pkvm_hyp_donate_host_mmio_locked() - Donate MMIO pages from hypervisor to
  *					host with the host mmu already locked
  *					by the caller.
