@@ -1758,6 +1758,28 @@
   media_entity_remote_pad_unique
   media_pad_remote_pad_first
   media_pad_remote_pad_unique
+  mei_cldev_disable
+  __mei_cldev_driver_register
+  mei_cldev_driver_unregister
+  mei_cldev_enable
+  mei_cldev_get_drvdata
+  mei_cldev_recv
+  mei_cldev_recv_timeout
+  mei_cldev_send
+  mei_cldev_send_gsc_command
+  mei_cldev_send_timeout
+  mei_cldev_set_drvdata
+  mei_deregister
+  mei_me_dev_init
+  mei_me_get_cfg
+  mei_me_irq_quick_handler
+  mei_me_irq_thread_handler
+  mei_me_polling_thread
+  mei_register
+  mei_restart
+  mei_start
+  mei_stop
+  mei_write_is_idle
   memchr
   memchr_inv
   memcmp
