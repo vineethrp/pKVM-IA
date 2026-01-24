@@ -1734,14 +1734,6 @@ int dmar_enable_qi(struct intel_iommu *iommu)
 
 	qi->desc = desc;
 
-	qi->desc_status = kcalloc(QI_LENGTH, sizeof(int), GFP_ATOMIC);
-	if (!qi->desc_status) {
-		iommu_free_pages(qi->desc);
-		kfree(qi);
-		iommu->qi = NULL;
-		return -ENOMEM;
-	}
-
 	raw_spin_lock_init(&qi->q_lock);
 
 	__dmar_enable_qi(iommu);
