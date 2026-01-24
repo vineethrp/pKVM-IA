@@ -13826,6 +13826,7 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 
 #ifdef CONFIG_PKVM_X86
 	kvm->arch.pkvm.pvmfw_load_addr = INVALID_GPA;
+	mutex_init(&kvm->arch.pkvm.finalized_lock);
 #endif
 
 	kvm_apicv_init(kvm);
