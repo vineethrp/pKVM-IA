@@ -24,7 +24,7 @@ unsigned int iommu_pglvl_mask;
 /* GCMD bits currently understood by pKVM. */
 #define DMAR_GCMD_SUPPORTED	(DMAR_GSTS_EN_BITS | DMAR_GCMD_ONESHOT)
 
-static struct intel_iommu *iommu_from_phys(u64 phys)
+struct intel_iommu *iommu_from_phys(u64 phys)
 {
 	unsigned int i;
 
@@ -109,13 +109,19 @@ static int handle_gcmd_direct(struct intel_iommu *iommu, u32 bit, bool set)
 
 static int initialize_qi(struct intel_iommu *iommu)
 {
-	struct q_inval *qi = iommu->qi;
-	u64 val = __pkvm_pa(qi->desc);
+	void *desc = pkvm_host_gpa_to_virt(iommu->viqa & VTD_PAGE_MASK);
+	u64 desc_sz = ecap_smts(iommu->ecap) ? SZ_8K : SZ_4K;
+	struct q_inval *qi = &iommu->_qi;
+	u64 desc_pa = __pkvm_pa(desc);
+	u64 val = desc_pa;
+	int ret;
 
-	/*
-	 * TODO: Write-protect the QI descriptor page once the hypervisor takes
-	 * over all QI operations.
-	 */
+	ret = pkvm_host_donate_hyp_share_ro(desc_pa, desc_sz, true);
+	if (ret) {
+		pkvm_err("iommu%d: failed to write protect QI desc!\n",
+			 iommu->seq_id);
+		return ret;
+	}
 
 	iommu->flush.flush_context = qi_flush_context;
 	iommu->flush.flush_iotlb = qi_flush_iotlb;
@@ -124,6 +130,7 @@ static int initialize_qi(struct intel_iommu *iommu)
 	qi->free_head = 0;
 	qi->free_tail = 0;
 	qi->free_cnt = QI_LENGTH;
+	qi->desc = desc;
 
 	/*
 	 * Set DW=1 and QS=1 in IQA_REG when Scalable Mode capability
@@ -136,7 +143,22 @@ static int initialize_qi(struct intel_iommu *iommu)
 	writel(0, iommu->reg + DMAR_IQT_REG);
 	writeq(val, iommu->reg + DMAR_IQA_REG);
 
-	return handle_gcmd_direct(iommu, DMA_GCMD_QIE, true);
+	ret = handle_gcmd_direct(iommu, DMA_GCMD_QIE, true);
+	if (ret) {
+		pkvm_hyp_donate_host(desc_pa, desc_sz, false);
+		return ret;
+	}
+
+	/*
+	 * Host IOMMU driver dynamically allocates iommu->qi, but pKVM has it
+	 * embedded. For easy re-use of host code, the embedded field is named
+	 * as iommu->_qi, and the pointer iommu->qi points to iommu->_qi.
+	 * Also, it serves as a flag to denote whether qi is
+	 * enabled(similar to how host driver does)
+	 */
+	iommu->qi = qi;
+
+	return 0;
 }
 
 static int handle_gcmd_qie(struct intel_iommu *iommu, bool enable)
@@ -153,14 +175,6 @@ static int handle_gcmd_qie(struct intel_iommu *iommu, bool enable)
 			return -EINVAL;
 		}
 
-		/*
-		 * The host dynamically allocates iommu->qi, but pKVM embeds the
-		 * structure. Point qi at the embedded instance both to reuse the
-		 * host representation and to record that QI has been initialized.
-		 */
-		iommu->qi = &iommu->_qi;
-		iommu->qi->desc =
-			pkvm_host_gpa_to_virt(iommu->viqa & VTD_PAGE_MASK);
 		ret = initialize_qi(iommu);
 	} else {
 		if (!iommu->qi)
@@ -258,6 +272,8 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 	case DMAR_CAP_REG:
 	case DMAR_ECAP_REG:
 	case DMAR_GSTS_REG:
+		fallthrough;
+	case DMAR_IQH_REG:
 		ret = -EINVAL;
 		break;
 	case DMAR_GCMD_REG:
@@ -270,6 +286,13 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 			ret = -EINVAL;
 		} else {
 			iommu->viqa = val;
+		}
+		break;
+	case DMAR_IQT_REG:
+		if (iommu->qi) {
+			pkvm_err("iommu%d: write to IQT not allowed!\n",
+				 iommu->seq_id);
+			ret = -EPERM;
 		}
 		break;
 	default:
