@@ -218,7 +218,7 @@ static void handle_gcmd_srtp(struct intel_iommu *iommu)
 
 	/* TODO: Write protect Root Table page */
 	set_root_table(iommu);
-	iommu->root_entry = __pkvm_va(iommu->vrta & VTD_PAGE_MASK);
+	iommu->root_entry = pkvm_host_gpa_to_virt(iommu->vrta & VTD_PAGE_MASK);
 
 	pkvm_dbg("iommu%d Set Root Table(%llx)!\n", iommu->seq_id, iommu->vrta);
 	return;
@@ -392,6 +392,16 @@ static int pkvm_handle_iommu_hypercall(void *in, void *out)
 	case qi_submit: {
 		struct qi_submit_data *data = &data_in->qi_submit;
 		ret = pkvm_iommu_qi_submit(data);
+		break;
+	}
+	case clear_ce: {
+		struct clear_ce_data *data = &data_in->clear_ce;
+		ret = pkvm_iommu_clear_ce(data);
+		break;
+	}
+	case set_lm_ce: {
+		struct set_lm_ce_data *data = &data_in->set_lm_ce;
+		ret = pkvm_iommu_set_lm_ce(data);
 		break;
 	}
 	default:

@@ -91,9 +91,13 @@ int __init pkvm_host_init_iommu(void);
 
 struct qi_desc;
 struct intel_iommu;
+struct device_domain_info;
 
 int pv_qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
 		      unsigned int count, unsigned long options);
+int pv_context_clear(u64 phys, u8 bus, u8 devfn, struct device_domain_info *info);
+int pv_context_mapping(struct intel_iommu *iommu, struct device_domain_info *info,
+		       u8 bus, u8 devfn, u64 pgd_gpa, u16 did, u8 agaw);
 #else /* __PKVM_HYP__ */
 
 bool is_dev_in_satc(u16 bdf);
@@ -136,5 +140,7 @@ int pkvm_intel_iommu_init(void);
 #else /* !CONFIG_PKVM_INTEL */
 
 #define pv_qi_submit_sync(iommu, desc, count, options)	-EOPNOTSUPP
+#define pv_context_mapping(iommu, pgd_gpa, did, agaw, bus, devfn, info) -EOPNOTSUPP
+#define pv_context_clear(phys, bus, devfn, info) -EOPNOTSUPP
 #endif /* CONFIG_PKVM_INTEL */
 #endif /* _PKVM_INTEL_IOMMU_H_ */
