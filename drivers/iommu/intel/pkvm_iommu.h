@@ -11,6 +11,7 @@
 #endif
 
 #define PKVM_MAX_IOMMUS	16
+#define PKVM_MAX_SATC_DEVS	16
 
 /* Page-table levels represented by the IOMMU SAGAW capability. */
 #define PKVM_IOMMU_PGT_4LEVEL	BIT(2)
@@ -28,6 +29,11 @@ struct pkvm_iommu_info {
 	int msagaw;
 };
 
+struct pkvm_iommu_device_id {
+	u16 segment;
+	u16 bdf;
+};
+
 struct qi_desc;
 struct intel_iommu;
 
@@ -37,13 +43,19 @@ struct intel_iommu;
 
 #ifdef CONFIG_PKVM_INTEL
 PKVM_DECLARE(int, pkvm_prepare_iommus,
-	     (const struct pkvm_iommu_info *infos, unsigned int nr_iommus));
+	     (const struct pkvm_iommu_info *infos, unsigned int nr_iommus,
+	      const struct pkvm_iommu_device_id *satc_devs,
+	      unsigned int nr_satc_devs));
 
 #ifndef __PKVM_HYP__
 u64 pkvm_readq(struct intel_iommu *iommu, unsigned long offset);
 u32 pkvm_readl(struct intel_iommu *iommu, unsigned long offset);
 void pkvm_writeq(struct intel_iommu *iommu, unsigned long offset, u64 val);
 void pkvm_writel(struct intel_iommu *iommu, unsigned long offset, u32 val);
+
+int __init pkvm_scan_satc_devs(struct pkvm_iommu_device_id *satc_devs,
+			       unsigned int *nr_satc_devs,
+			       unsigned int max_satc_devs);
 
 int __init pkvm_host_prepare_iommu(void);
 int __init pkvm_host_init_iommu(void);
@@ -82,6 +94,7 @@ static inline bool is_iommu_mmio(u64 phys)
 }
 
 bool overlaps_iommu_mmio(u64 phys, u64 size);
+bool is_dev_in_satc(u16 segment, u16 bdf);
 
 int pkvm_intel_iommu_init(void);
 int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val);

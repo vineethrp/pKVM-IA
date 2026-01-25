@@ -10,6 +10,8 @@
 
 static struct intel_iommu iommus[PKVM_MAX_IOMMUS];
 static unsigned int nr_iommus;
+static struct pkvm_iommu_device_id satc_devs[PKVM_MAX_SATC_DEVS];
+static unsigned int nr_satc_devs;
 unsigned int iommu_pgsz_mask;
 unsigned int iommu_pglvl_mask;
 
@@ -23,6 +25,19 @@ unsigned int iommu_pglvl_mask;
 				 DMA_GCMD_SIRTP)
 /* GCMD bits currently understood by pKVM. */
 #define DMAR_GCMD_SUPPORTED	(DMAR_GSTS_EN_BITS | DMAR_GCMD_ONESHOT)
+
+bool is_dev_in_satc(u16 segment, u16 bdf)
+{
+	unsigned int i;
+
+	for (i = 0; i < nr_satc_devs; i++) {
+		if (segment == satc_devs[i].segment &&
+		    bdf == satc_devs[i].bdf)
+			return true;
+	}
+
+	return false;
+}
 
 struct intel_iommu *iommu_from_phys(u64 phys)
 {
@@ -463,7 +478,9 @@ static bool ranges_overlap(u64 start_a, u64 size_a, u64 start_b, u64 size_b)
 }
 
 int __init pkvm_prepare_iommus(const struct pkvm_iommu_info *infos,
-			       unsigned int count)
+			       unsigned int count,
+			       const struct pkvm_iommu_device_id *satc,
+			       unsigned int satc_count)
 {
 	unsigned int pgsz_mask = BIT(PG_LEVEL_4K) |
 				 BIT(PG_LEVEL_2M) |
@@ -472,7 +489,8 @@ int __init pkvm_prepare_iommus(const struct pkvm_iommu_info *infos,
 				  PKVM_IOMMU_PGT_5LEVEL;
 	unsigned int i, j;
 
-	if (!infos || !count || count > ARRAY_SIZE(iommus) || nr_iommus)
+	if (!infos || !count || count > ARRAY_SIZE(iommus) || nr_iommus ||
+	    satc_count > ARRAY_SIZE(satc_devs) || (satc_count && !satc))
 		return -EINVAL;
 
 	for (i = 0; i < count; i++) {
@@ -508,6 +526,14 @@ int __init pkvm_prepare_iommus(const struct pkvm_iommu_info *infos,
 		}
 	}
 
+	for (i = 0; i < satc_count; i++) {
+		for (j = 0; j < count; j++)
+			if (satc[i].segment == infos[j].segment)
+				break;
+		if (j == count)
+			return -EINVAL;
+	}
+
 	if (!pglvl_mask)
 		return -EOPNOTSUPP;
 
@@ -527,6 +553,9 @@ int __init pkvm_prepare_iommus(const struct pkvm_iommu_info *infos,
 	}
 
 	nr_iommus = count;
+	if (satc_count)
+		memcpy(satc_devs, satc, sizeof(*satc) * satc_count);
+	nr_satc_devs = satc_count;
 	iommu_pglvl_mask = pglvl_mask;
 	iommu_pgsz_mask = pgsz_mask;
 	return 0;
