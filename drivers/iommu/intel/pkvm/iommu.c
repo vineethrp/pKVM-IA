@@ -31,7 +31,7 @@ unsigned int iommu_pglvl_mask = IOMMU_PGT_4LEVEL | IOMMU_PGT_5LEVEL;
 static struct intel_iommu iommus[PKVM_MAX_IOMMU_NUM];
 static int nr_iommus;
 
-static struct intel_iommu *iommu_from_phys(unsigned long phys)
+struct intel_iommu *iommu_from_phys(unsigned long phys)
 {
 	int i;
 
@@ -282,7 +282,22 @@ static int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 
 static int pkvm_handle_iommu_hypercall(void *in, void *out)
 {
-	return 0;
+	struct iommu_hc_data *data_in = (struct iommu_hc_data *)in;
+	int ret;
+
+	switch (data_in->hc_num) {
+	case qi_submit: {
+		struct qi_submit_data *data = &data_in->qi_submit;
+		ret = pkvm_iommu_qi_submit(data);
+		break;
+	}
+	default:
+		pkvm_err("Invalid hypercall: %d\n", data_in->hc_num);
+		ret = -EINVAL;
+	}
+
+	*(struct iommu_hc_data *)out = *data_in;
+	return ret;
 }
 
 struct pkvm_iommu_ops iommu_ops __initdata = {
