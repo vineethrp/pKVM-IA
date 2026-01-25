@@ -117,6 +117,9 @@ static int initialize_qi(struct intel_iommu *iommu)
 	 * over all QI operations.
 	 */
 
+	iommu->flush.flush_context = qi_flush_context;
+	iommu->flush.flush_iotlb = qi_flush_iotlb;
+
 	pkvm_spin_lock_init(&qi->q_lock);
 	qi->free_head = 0;
 	qi->free_tail = 0;
