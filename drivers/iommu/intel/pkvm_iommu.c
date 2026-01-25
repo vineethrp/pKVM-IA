@@ -61,8 +61,10 @@ void pkvm_writel(struct intel_iommu *iommu, unsigned long offset, u32 val)
 int __init pkvm_host_prepare_iommu(void)
 {
 	struct pkvm_iommu_info infos[PKVM_MAX_IOMMUS];
+	struct pkvm_iommu_device_id satc_devs[PKVM_MAX_SATC_DEVS];
 	struct dmar_drhd_unit *drhd;
 	struct intel_iommu *iommu;
+	unsigned int nr_satc_devs;
 	unsigned int nr_iommus = 0;
 	int ret;
 
@@ -70,6 +72,12 @@ int __init pkvm_host_prepare_iommu(void)
 	ret = dmar_table_init();
 	if (ret) {
 		pr_err("Failed to initialize DMAR table: %d\n", ret);
+		goto out;
+	}
+
+	ret = dmar_dev_scope_init();
+	if (ret) {
+		pr_err("Failed to initialize DMAR device scopes: %d\n", ret);
 		goto out;
 	}
 
@@ -126,7 +134,13 @@ int __init pkvm_host_prepare_iommu(void)
 	if (!nr_iommus)
 		goto out;
 
-	ret = pkvm_sym(pkvm_prepare_iommus)(infos, nr_iommus);
+	ret = pkvm_scan_satc_devs(satc_devs, &nr_satc_devs,
+				  ARRAY_SIZE(satc_devs));
+	if (ret)
+		goto out;
+
+	ret = pkvm_sym(pkvm_prepare_iommus)(infos, nr_iommus,
+					    satc_devs, nr_satc_devs);
 out:
 	up_write(&dmar_global_lock);
 	return ret;

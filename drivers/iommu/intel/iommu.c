@@ -2125,6 +2125,54 @@ int dmar_parse_one_satc(struct acpi_dmar_header *hdr, void *arg)
 	return 0;
 }
 
+#ifdef CONFIG_PKVM_INTEL
+/*
+ * Snapshot the devices described by SATC while the host is still trusted.
+ * Keep this helper here because dmar_satc_units is private to this file.
+ */
+int __init
+pkvm_scan_satc_devs(struct pkvm_iommu_device_id *satc_devs,
+		    unsigned int *nr_satc_devs, unsigned int max_satc_devs)
+{
+	struct dmar_satc_unit *satcu;
+	unsigned int count = 0;
+	int i;
+
+	list_for_each_entry_rcu(satcu, &dmar_satc_units, list,
+				dmar_rcu_check()) {
+		struct acpi_dmar_satc *satc;
+		struct device *satc_dev;
+
+		satc = container_of(satcu->hdr, struct acpi_dmar_satc,
+				    header);
+		for_each_active_dev_scope(satcu->devices, satcu->devices_cnt,
+					  i, satc_dev) {
+			struct pci_dev *pdev;
+
+			if (count == max_satc_devs) {
+				pr_err("pKVM supports at most %u SATC devices\n",
+				       max_satc_devs);
+				return -E2BIG;
+			}
+			if (!dev_is_pci(satc_dev))
+				return -EINVAL;
+
+			pdev = to_pci_dev(satc_dev);
+			if (pci_domain_nr(pdev->bus) != satc->segment)
+				return -EINVAL;
+
+			satc_devs[count].segment = satc->segment;
+			satc_devs[count].bdf = pci_dev_id(pdev);
+			count++;
+			pr_info("pKVM: SATC device %s\n", dev_name(satc_dev));
+		}
+	}
+
+	*nr_satc_devs = count;
+	return 0;
+}
+#endif /* CONFIG_PKVM_INTEL */
+
 static int intel_iommu_add(struct dmar_drhd_unit *dmaru)
 {
 	struct intel_iommu *iommu = dmaru->iommu;
