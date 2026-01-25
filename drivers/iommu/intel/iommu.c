@@ -2606,6 +2606,37 @@ int dmar_parse_one_satc(struct acpi_dmar_header *hdr, void *arg)
 	return 0;
 }
 
+#ifdef CONFIG_PKVM_INTEL
+/*
+ * Parse SATCU and add bdf of devices in SATC in satc_devs.
+ * Used by pKVM to keep a record of devices in SATC so that it
+ * can selectively allow ATS for those devices.
+ * NOTE: function implemented here to avoid exposing dmar_satc_units
+ *       which is declared static in this file.
+ */
+int __init pkvm_update_satc_devs(u16 satc_devs[], int max_satc_devs)
+{
+	struct dmar_satc_unit *satcu;
+	int nr_satc_devs = 0, i;
+
+	list_for_each_entry_rcu(satcu, &dmar_satc_units, list,
+				dmar_rcu_check()) {
+		struct device *satc_dev;
+
+		for_each_active_dev_scope(satcu->devices, satcu->devices_cnt,
+					  i, satc_dev) {
+			satc_devs[nr_satc_devs++] =  pci_dev_id(to_pci_dev(satc_dev));
+			if (nr_satc_devs >= max_satc_devs) {
+				pr_warn("pkvm: max supported satc devs reached\n");
+				goto out;
+			}
+		}
+	}
+out:
+	return nr_satc_devs;
+}
+#endif /* CONFIG_PKVM_INTEL */
+
 static int intel_iommu_add(struct dmar_drhd_unit *dmaru)
 {
 	struct intel_iommu *iommu = dmaru->iommu;
