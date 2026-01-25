@@ -765,6 +765,7 @@ struct intel_iommu {
 	int msagaw;
 	struct q_inval _qi;
 	struct q_inval *qi;
+	struct iommu_flush flush;
 	pkvm_spinlock_t lock;
 };
 #endif
