@@ -2768,7 +2768,7 @@ static bool dmar_ats_supported(struct pci_dev *dev, struct intel_iommu *iommu)
 
 	dev = pci_physfn(dev);
 	satcu = dmar_find_matched_satc_unit(dev);
-	if (satcu)
+	if (satcu) {
 		/*
 		 * This device supports ATS as it is in SATC table.
 		 * When IOMMU is in legacy mode, enabling ATS is done
@@ -2777,6 +2777,13 @@ static bool dmar_ats_supported(struct pci_dev *dev, struct intel_iommu *iommu)
 		 * to avoid duplicated TLB invalidation.
 		 */
 		return !(satcu->atc_required && !sm_supported(iommu));
+	} else if (pkvm_enabled()) {
+		/*
+		 * pKVM hypervisor does not allow ATS for devices not in
+		 * SATC, so do not advertise ATS support for them.
+		 */
+		return 0;
+	}
 
 	for (bus = dev->bus; bus; bus = bus->parent) {
 		bridge = bus->self;
@@ -3884,7 +3891,7 @@ static struct iommu_device *intel_iommu_probe_device(struct device *dev)
 	}
 
 	dev_iommu_priv_set(dev, info);
-	if (pdev && pci_ats_supported(pdev)) {
+	if (pdev && info->ats_supported && pci_ats_supported(pdev)) {
 		pci_prepare_ats(pdev, VTD_PAGE_SHIFT);
 		ret = device_rbtree_insert(iommu, info);
 		if (ret)
@@ -3961,7 +3968,8 @@ static void intel_iommu_release_device(struct device *dev)
 	}
 
 	mutex_lock(&iommu->iopf_lock);
-	if (dev_is_pci(dev) && pci_ats_supported(to_pci_dev(dev)))
+	if (dev_is_pci(dev) && info->ats_supported &&
+	    pci_ats_supported(to_pci_dev(dev)))
 		device_rbtree_remove(info);
 	mutex_unlock(&iommu->iopf_lock);
 
