@@ -230,6 +230,9 @@ extern u64 pkvm_sym(x86_pred_cmd);
 extern struct fpu_state_config pkvm_sym(fpu_kernel_cfg);
 extern struct fpu_state_config pkvm_sym(fpu_user_cfg);
 extern struct vcpu_fpu_config pkvm_sym(guest_default_cfg);
+#ifdef CONFIG_X86_64
+DECLARE_STATIC_KEY_FALSE(pkvm_sym(__fpu_state_size_dynamic));
+#endif
 
 u64 pkvm_total_reserve_pages(void);
 PKVM_DECLARE(void *, pkvm_early_alloc_page, (void));
