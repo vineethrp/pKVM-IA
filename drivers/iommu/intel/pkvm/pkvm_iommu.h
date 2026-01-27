@@ -105,6 +105,11 @@ static inline bool iommu_supports_5levels(void)
 }
 
 struct intel_iommu *iommu_from_phys(unsigned long phys);
+static inline bool is_iommu_mmio_range(unsigned long phys)
+{
+	return !!iommu_from_phys(phys);
+}
+
 int pkvm_intel_iommu_init(void);
 #endif /* !__PKVM_HYP__ */
 
