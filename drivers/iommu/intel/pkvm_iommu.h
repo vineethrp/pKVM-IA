@@ -75,6 +75,14 @@ static inline bool iommu_supports_4levels(void)
 }
 
 struct intel_iommu *iommu_from_phys(u64 phys);
+
+static inline bool is_iommu_mmio(u64 phys)
+{
+	return !!iommu_from_phys(phys);
+}
+
+bool overlaps_iommu_mmio(u64 phys, u64 size);
+
 int pkvm_intel_iommu_init(void);
 int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val);
 int pkvm_iommu_mmio_write(u64 phys, int len, u64 val);

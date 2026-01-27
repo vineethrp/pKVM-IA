@@ -39,6 +39,27 @@ struct intel_iommu *iommu_from_phys(u64 phys)
 	return NULL;
 }
 
+bool overlaps_iommu_mmio(u64 phys, u64 size)
+{
+	u64 end;
+	unsigned int i;
+
+	if (!size || size > U64_MAX - phys)
+		return true;
+
+	end = phys + size;
+
+	for (i = 0; i < nr_iommus; i++) {
+		struct intel_iommu *iommu = &iommus[i];
+
+		if (phys < iommu->reg_phys + iommu->reg_size &&
+		    end > iommu->reg_phys)
+			return true;
+	}
+
+	return false;
+}
+
 static int iommu_direct_mmio_read(struct intel_iommu *iommu, u64 phys,
 				  int len, u64 *val)
 {
