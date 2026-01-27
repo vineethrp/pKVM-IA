@@ -98,6 +98,8 @@ int pv_qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
 int pv_context_clear(u64 phys, u8 bus, u8 devfn, struct device_domain_info *info);
 int pv_context_mapping(struct intel_iommu *iommu, struct device_domain_info *info,
 		       u8 bus, u8 devfn, u64 pgd_gpa, u16 did, u8 agaw);
+int pv_pasid_table_setup(struct intel_iommu *iommu, struct device_domain_info *info,
+			 u8 bus, u8 devfn);
 #else /* __PKVM_HYP__ */
 
 bool is_dev_in_satc(u16 bdf);
