@@ -312,6 +312,11 @@ int pkvm_handle_host_ept_violation(void)
 		return ret;
 	}
 
+	if (is_iommu_mmio_range(gpa)) {
+		pkvm_err("Host access to protected IOMMU MMIO space at 0x%lx\n", gpa);
+		return ret;
+	}
+
 	pkvm_host_mmu_lock();
 
 	pkvm_pgtable_lookup(host_ept, gpa, &hpa, NULL, &level);
