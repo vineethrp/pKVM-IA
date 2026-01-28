@@ -6689,6 +6689,7 @@ static int handle_pml_full(struct kvm_vcpu *vcpu)
 	 */
 	return 1;
 }
+#endif /* !__PKVM_HYP__ */
 
 static fastpath_t handle_fastpath_preemption_timer(struct kvm_vcpu *vcpu,
 						   bool force_immediate_exit)
@@ -6710,6 +6711,7 @@ static fastpath_t handle_fastpath_preemption_timer(struct kvm_vcpu *vcpu,
 	if (force_immediate_exit)
 		return EXIT_FASTPATH_EXIT_HANDLED;
 
+#ifndef __PKVM_HYP__
 	/*
 	 * If L2 is active, go down the slow path as emulating the guest timer
 	 * expiration likely requires synthesizing a nested VM-Exit.
@@ -6719,8 +6721,12 @@ static fastpath_t handle_fastpath_preemption_timer(struct kvm_vcpu *vcpu,
 
 	kvm_lapic_expired_hv_timer(vcpu);
 	return EXIT_FASTPATH_REENTER_GUEST;
+#else
+	return EXIT_FASTPATH_NONE;
+#endif
 }
 
+#ifndef __PKVM_HYP__
 static int handle_preemption_timer(struct kvm_vcpu *vcpu)
 {
 	/*
@@ -7988,15 +7994,12 @@ static void vmx_refresh_guest_perf_global_control(struct kvm_vcpu *vcpu)
 static void vmx_update_hv_timer(struct kvm_vcpu *vcpu, bool force_immediate_exit)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
-#ifndef __PKVM_HYP__
 	u64 tscl;
 	u32 delta_tsc;
-#endif
 
 	if (force_immediate_exit) {
 		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, 0);
 		vmx->loaded_vmcs->hv_timer_soft_disabled = false;
-#ifndef __PKVM_HYP__
 	} else if (vmx->hv_deadline_tsc != -1) {
 		tscl = rdtsc();
 		if (vmx->hv_deadline_tsc > tscl)
@@ -8008,7 +8011,6 @@ static void vmx_update_hv_timer(struct kvm_vcpu *vcpu, bool force_immediate_exit
 
 		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, delta_tsc);
 		vmx->loaded_vmcs->hv_timer_soft_disabled = false;
-#endif
 	} else if (!vmx->loaded_vmcs->hv_timer_soft_disabled) {
 		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, -1);
 		vmx->loaded_vmcs->hv_timer_soft_disabled = true;
@@ -8041,8 +8043,10 @@ static fastpath_t vmx_exit_handlers_fastpath(struct kvm_vcpu *vcpu,
 	case EXIT_REASON_MSR_WRITE_IMM:
 		return handle_fastpath_wrmsr_imm(vcpu, vmx_get_exit_qual(vcpu),
 						 vmx_get_msr_imm_reg(vcpu));
+#endif
 	case EXIT_REASON_PREEMPTION_TIMER:
 		return handle_fastpath_preemption_timer(vcpu, force_immediate_exit);
+#ifndef __PKVM_HYP__
 	case EXIT_REASON_HLT:
 		return handle_fastpath_hlt(vcpu);
 	case EXIT_REASON_INVD:
