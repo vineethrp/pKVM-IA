@@ -23,6 +23,11 @@
 #include "../iommu-pages.h"
 
 #ifdef __PKVM_HYP__
+#include "pkvm/memory.h"
+#undef phys_to_virt
+#define phys_to_virt __pkvm_va
+#undef virt_to_phys
+#define virt_to_phys __pkvm_pa
 #undef spin_lock
 #define spin_lock pkvm_spin_lock
 #undef spin_unlock
@@ -111,8 +116,13 @@ void intel_pasid_free_table(struct device *dev)
 	iommu_free_pages(pasid_table->table);
 	kfree(pasid_table);
 }
+#endif /* !__PKVM_HYP__ */
 
+#ifndef __PKVM_HYP__
 struct pasid_table *intel_pasid_get_table(struct device *dev)
+#else
+struct pasid_table *intel_pasid_get_table(struct pkvm_device *dev)
+#endif
 {
 	struct device_domain_info *info;
 
@@ -123,7 +133,11 @@ struct pasid_table *intel_pasid_get_table(struct device *dev)
 	return info->pasid_table;
 }
 
+#ifndef __PKVM_HYP__
 static int intel_pasid_get_dev_max_id(struct device *dev)
+#else
+static int intel_pasid_get_dev_max_id(struct pkvm_device *dev)
+#endif
 {
 	struct device_domain_info *info;
 
@@ -134,7 +148,12 @@ static int intel_pasid_get_dev_max_id(struct device *dev)
 	return info->pasid_table->max_pasid;
 }
 
+#ifndef __PKVM_HYP__
 static struct pasid_entry *intel_pasid_get_entry(struct device *dev, u32 pasid)
+#else
+static struct pasid_entry *
+intel_pasid_get_entry(struct pkvm_device *dev, u32 pasid)
+#endif
 {
 	struct device_domain_info *info;
 	struct pasid_table *pasid_table;
@@ -156,8 +175,12 @@ retry:
 	if (!entries) {
 		u64 tmp;
 
+#ifndef __PKVM_HYP__
 		entries = iommu_alloc_pages_node_sz(info->iommu->node,
 						    GFP_ATOMIC, SZ_4K);
+#else
+		entries = pkvm_iommu_donation_page(info->iommu);
+#endif
 		if (!entries)
 			return ERR_PTR(-ENOMEM);
 
@@ -173,7 +196,11 @@ retry:
 		tmp = 0ULL;
 		if (!try_cmpxchg64(&dir[dir_index].val, &tmp,
 				   (u64)virt_to_phys(entries) | PASID_PTE_PRESENT)) {
+#ifndef __PKVM_HYP__
 			iommu_free_pages(entries);
+#else
+			info->iommu->donation_page = entries;
+#endif
 			goto retry;
 		}
 		if (!ecap_coherent(info->iommu->ecap))
@@ -187,7 +214,11 @@ retry:
  * Interfaces for PASID table entry manipulation:
  */
 static void
+#ifndef __PKVM_HYP__
 intel_pasid_clear_entry(struct device *dev, u32 pasid, bool fault_ignore)
+#else
+intel_pasid_clear_entry(struct pkvm_device *dev, u32 pasid, bool fault_ignore)
+#endif
 {
 	struct pasid_entry *pe;
 
@@ -218,7 +249,11 @@ pasid_cache_invalidation_with_pasid(struct intel_iommu *iommu,
 
 static void
 devtlb_invalidation_with_pasid(struct intel_iommu *iommu,
+#ifndef __PKVM_HYP__
 			       struct device *dev, u32 pasid)
+#else
+			       struct pkvm_device *dev, u32 pasid)
+#endif
 {
 	struct device_domain_info *info;
 	u16 sid, qdep, pfsid;
@@ -227,8 +262,10 @@ devtlb_invalidation_with_pasid(struct intel_iommu *iommu,
 	if (!info || !info->ats_enabled)
 		return;
 
+#ifndef __PKVM_HYP__
 	if (!pci_device_is_present(to_pci_dev(dev)))
 		return;
+#endif
 
 	sid = PCI_DEVID(info->bus, info->devfn);
 	qdep = info->ats_qdep;
@@ -246,7 +283,12 @@ devtlb_invalidation_with_pasid(struct intel_iommu *iommu,
 		qi_flush_dev_iotlb_pasid(iommu, sid, pfsid, pasid, qdep, 0, 64 - VTD_PAGE_SHIFT);
 }
 
+#ifndef __PKVM_HYP__
 void intel_pasid_tear_down_entry(struct intel_iommu *iommu, struct device *dev,
+#else
+void intel_pasid_tear_down_entry(struct intel_iommu *iommu,
+				 struct pkvm_device *dev,
+#endif
 				 u32 pasid, bool fault_ignore)
 {
 	struct pasid_entry *pte;
@@ -274,7 +316,9 @@ void intel_pasid_tear_down_entry(struct intel_iommu *iommu, struct device *dev,
 		 */
 		pasid_clear_entry(pte);
 		spin_unlock(&iommu->lock);
+#ifndef __PKVM_HYP__
 		intel_iommu_drain_pasid_prq(dev, pasid);
+#endif
 
 		return;
 	}
@@ -299,8 +343,10 @@ void intel_pasid_tear_down_entry(struct intel_iommu *iommu, struct device *dev,
 	if (!ecap_coherent(iommu->ecap))
 		clflush_cache_range(pte, sizeof(*pte));
 
+#ifndef __PKVM_HYP__
 	if (!fault_ignore)
 		intel_iommu_drain_pasid_prq(dev, pasid);
+#endif
 }
 
 /*
@@ -330,6 +376,7 @@ static void pasid_flush_caches(struct intel_iommu *iommu,
  * - Flush the caches per Table 28 ”Guidance to Software for Invalidations“
  *   of VT-d spec 5.0.
  */
+#ifndef __PKVM_HYP__
 static void intel_pasid_flush_present(struct intel_iommu *iommu,
 				      struct device *dev,
 				      u32 pasid, u16 did,
@@ -354,6 +401,7 @@ static void intel_pasid_flush_present(struct intel_iommu *iommu,
 
 	devtlb_invalidation_with_pasid(iommu, dev, pasid);
 }
+#endif
 
 /*
  * Set up the scalable mode pasid table entry for first only
@@ -364,7 +412,9 @@ static void pasid_pte_config_first_level(struct intel_iommu *iommu,
 					 phys_addr_t fsptptr, u16 did,
 					 int flags)
 {
+#ifndef __PKVM_HYP__
 	lockdep_assert_held(&iommu->lock);
+#endif
 
 	pasid_clear_entry(pte);
 
@@ -386,21 +436,26 @@ static void pasid_pte_config_first_level(struct intel_iommu *iommu,
 	pasid_set_present(pte);
 }
 
+#ifndef __PKVM_HYP__
 int intel_pasid_setup_first_level(struct intel_iommu *iommu, struct device *dev,
+#else
+int intel_pasid_setup_first_level(struct intel_iommu *iommu,
+				  struct pkvm_device *dev,
+#endif
 				  phys_addr_t fsptptr, u32 pasid, u16 did,
 				  int flags)
 {
 	struct pasid_entry *pte;
 
 	if (!ecap_flts(iommu->ecap)) {
-		pr_err("No first level translation support on %s\n",
-		       iommu->name);
+		pr_err("No first level translation support on iommu%d\n",
+		       iommu->seq_id);
 		return -EINVAL;
 	}
 
 	if ((flags & PASID_FLAG_FL5LP) && !cap_fl5lp_support(iommu->cap)) {
-		pr_err("No 5-level paging support for first-level on %s\n",
-		       iommu->name);
+		pr_err("No 5-level paging support for first-level on iommu%d\n",
+		       iommu->seq_id);
 		return -EINVAL;
 	}
 
@@ -432,20 +487,36 @@ static void pasid_pte_config_second_level(struct intel_iommu *iommu,
 					  struct pasid_entry *pte,
 					  struct dmar_domain *domain, u16 did)
 {
+	phys_addr_t root;
+	u8 agaw;
+	bool page_snoop;
+	bool dirty_tracking;
+#ifndef __PKVM_HYP__
 	struct pt_iommu_vtdss_hw_info pt_info;
 
 	lockdep_assert_held(&iommu->lock);
 
 	pt_iommu_vtdss_hw_info(&domain->sspt, &pt_info);
+	root = pt_info.ssptptr;
+	agaw = pt_info.aw;
+	page_snoop = !(domain->sspt.vtdss_pt.common.features &
+			 BIT(PT_FEAT_DMA_INCOHERENT));
+	dirty_tracking = domain->dirty_tracking;
+#else
+	root = domain->root_pa;
+	agaw = domain->agaw;
+	page_snoop = !!ecap_smpwc(iommu->ecap);
+	dirty_tracking = false;
+#endif
+
 	pasid_clear_entry(pte);
 	pasid_set_domain_id(pte, did);
-	pasid_set_slptr(pte, pt_info.ssptptr);
-	pasid_set_address_width(pte, pt_info.aw);
+	pasid_set_slptr(pte, root);
+	pasid_set_address_width(pte, agaw);
 	pasid_set_translation_type(pte, PASID_ENTRY_PGTT_SL_ONLY);
 	pasid_set_fault_enable(pte);
-	pasid_set_page_snoop(pte, !(domain->sspt.vtdss_pt.common.features &
-				    BIT(PT_FEAT_DMA_INCOHERENT)));
-	if (domain->dirty_tracking)
+	pasid_set_page_snoop(pte, page_snoop);
+	if (dirty_tracking)
 		pasid_set_ssade(pte);
 
 	pasid_set_present(pte);
@@ -453,23 +524,31 @@ static void pasid_pte_config_second_level(struct intel_iommu *iommu,
 
 int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 				   struct dmar_domain *domain,
+#ifndef __PKVM_HYP__
 				   struct device *dev, u32 pasid)
+#else
+				   struct pkvm_device *dev, u16 did, u32 pasid)
+#endif
 {
 	struct pasid_entry *pte;
+#ifndef __PKVM_HYP__
 	u16 did;
 
+#endif
 
 	/*
 	 * If hardware advertises no support for second level
 	 * translation, return directly.
 	 */
 	if (!ecap_slts(iommu->ecap)) {
-		pr_err("No second level translation support on %s\n",
-		       iommu->name);
+		pr_err("No second level translation support on iommu%d\n",
+		       iommu->seq_id);
 		return -EINVAL;
 	}
 
+#ifndef __PKVM_HYP__
 	did = domain_id_iommu(domain, iommu);
+#endif
 
 	spin_lock(&iommu->lock);
 	pte = intel_pasid_get_entry(dev, pasid);
@@ -491,6 +570,7 @@ int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 	return 0;
 }
 
+#ifndef __PKVM_HYP__
 /*
  * Set up dirty tracking on a second only or nested translation type.
  */
@@ -783,7 +863,7 @@ void intel_pasid_teardown_sm_context(struct device *dev)
 
 	pci_for_each_dma_alias(to_pci_dev(dev), pci_pasid_table_teardown, dev);
 }
-#endif /* __PKVM_HYP__ */
+#endif /* !__PKVM_HYP__ */
 
 /*
  * Get the PASID directory size for scalable mode context entry.
