@@ -74,6 +74,7 @@ int __init pkvm_host_prepare_iommu(void)
 	}
 
 	pkvm_sym(intel_iommu_sm) &= intel_iommu_sm;
+	pkvm_sym(intel_iommu_superpage) &= intel_iommu_superpage;
 	pkvm_sym(nr_satc_devs) = pkvm_update_satc_devs(pkvm_sym(satc_devs),
 						       PKVM_MAX_SATC_DEVS);
 
