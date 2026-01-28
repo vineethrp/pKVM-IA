@@ -120,6 +120,18 @@ struct pasid_teardown_data {
 	u8 devfn;
 	u8 ats_qdep;
 };
+
+struct alloc_domain_data {
+	u64 phys;
+	u64 max_addr;
+	u64 pgd_gpa;
+	u16 bdf;
+	u16 gaw;
+	u8 agaw;
+	u8 iommu_superpage;
+	u8 iommu_coherency;
+	u8 use_first_level;
+};
 #endif
 
 #define TO_PKVM_HC(f)		CONCATENATE(__pkvm__, f)
@@ -222,6 +234,9 @@ union pkvm_hc_data {
 	struct {
 		struct pasid_teardown_data data;
 	} iommu_pasid_teardown;
+	struct {
+		struct alloc_domain_data data;
+	} iommu_alloc_domain;
 #endif
 	struct {
 		bool has_intr;
