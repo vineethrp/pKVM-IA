@@ -444,6 +444,16 @@ static int pkvm_handle_iommu_hypercall(void *in, void *out)
 		ret = pkvm_iommu_free_domain(data);
 		break;
 	}
+	case domain_mapping: {
+		struct domain_mapping_data *data = &data_in->domain_mapping;
+		ret = pkvm_iommu_domain_mapping(data);
+		break;
+	}
+	case domain_unmapping: {
+		struct domain_unmapping_data *data = &data_in->domain_unmapping;
+		ret = pkvm_iommu_domain_unmapping(data);
+		break;
+	}
 	default:
 		pkvm_err("Invalid hypercall: %d\n", data_in->hc_num);
 		ret = -EINVAL;

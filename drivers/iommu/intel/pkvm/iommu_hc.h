@@ -18,6 +18,8 @@ enum iommu_hc_num {
 	pasid_teardown,
 	alloc_domain,
 	free_domain,
+	domain_mapping,
+	domain_unmapping,
 };
 
 struct qi_submit_data {
@@ -115,10 +117,27 @@ struct alloc_domain_data {
 	u8 iommu_superpage;
 	u8 iommu_coherency;
 	u8 use_first_level;
+	struct pkvm_memcache mc;
 };
 
 struct free_domain_data {
 	u64 pgd_gpa;
+	struct pkvm_memcache mc;
+};
+
+struct domain_mapping_data {
+	u64 pgd_gpa;
+	u64 iov_pfn;
+	u64 phys_pfn;
+	u64 nr_pages;
+	u64 prot;
+	struct pkvm_memcache mc;
+};
+
+struct domain_unmapping_data {
+	u64 pgd_gpa;
+	u64 start_pfn;
+	u64 last_pfn;
 };
 
 struct iommu_hc_data {
@@ -132,6 +151,8 @@ struct iommu_hc_data {
 		struct pasid_teardown_data pasid_teardown;
 		struct alloc_domain_data alloc_domain;
 		struct free_domain_data free_domain;
+		struct domain_mapping_data domain_mapping;
+		struct domain_unmapping_data domain_unmapping;
 	};
 	u8 hc_num;
 };
@@ -146,4 +167,6 @@ int pkvm_iommu_pasid_setup_sl(struct pasid_setup_sl_data *data);
 int pkvm_iommu_pasid_teardown(struct pasid_teardown_data *data);
 int pkvm_iommu_alloc_domain(struct alloc_domain_data *data);
 int pkvm_iommu_free_domain(struct free_domain_data *data);
+int pkvm_iommu_domain_mapping(struct domain_mapping_data *data);
+int pkvm_iommu_domain_unmapping(struct domain_unmapping_data *data);
 #endif /* _PKVM_INTEL_IOMMU_HC_H_ */
