@@ -3,6 +3,7 @@
 
 
 #include <linux/hashtable.h>
+#include <linux/bug.h>
 #include <asm/pkvm_spinlock.h>
 #include "pkvm/debug.h"
 #include "pkvm/memory.h"
@@ -68,24 +69,6 @@ void pkvm_put_iommu_domain(struct dmar_domain *domain)
 	WARN_ON_ONCE(atomic_dec_and_test(&domain->refcount));
 }
 
-int pkvm_free_iommu_domain(struct dmar_domain *domain)
-{
-	if (atomic_cmpxchg(&domain->refcount, 1, 0) != 1) {
-		pkvm_err("%s: domain[pgd:%px] has users, refcount %d\n",
-			 __func__, domain->pgd, atomic_read(&domain->refcount));
-		return -EBUSY;
-	}
-
-	pkvm_dbg("%s: freed domain pgd: %px\n", __func__, domain->pgd);
-	pkvm_spin_lock(&iommu_domain_lock);
-	hash_del(&domain->hnode);
-	__clear_bit(domain->index, iommu_domains_bitmap);
-	memset(domain, 0, sizeof(struct dmar_domain));
-	pkvm_spin_unlock(&iommu_domain_lock);
-
-	return 0;
-}
-
 struct dmar_domain *pkvm_alloc_iommu_domain(struct alloc_domain_data *data)
 {
 	void* pgd = pkvm_host_gpa_to_virt(data->pgd_gpa);
@@ -124,4 +107,85 @@ struct dmar_domain *pkvm_alloc_iommu_domain(struct alloc_domain_data *data)
 	pkvm_spin_unlock(&iommu_domain_lock);
 
 	return domain;
+}
+
+/*
+ * memcache helper functions.
+ */
+
+int refill_domain_memcache(struct dmar_domain *domain, struct pkvm_memcache *host_mc)
+{
+	struct pkvm_memcache *mc = &domain->mc;
+	unsigned long min_pages;
+
+	/*
+	 * Host expects pKVM to drain the memcache fully as it is
+	 * not persistent. Host makes the hypercall without memcache
+	 * the first time and passes memcache next time only if the
+	 * initial hypercall failed with ENOMEM.
+	 */
+	min_pages = mc->count + host_mc->count;
+	while (mc->count < min_pages) {
+		phys_addr_t *p;
+		struct pkvm_page_range page_range;
+
+		page_range = pop_pkvm_memcache(host_mc, pkvm_host_gpa_to_virt);
+		p = pkvm_host_gpa_to_virt(page_range.addr);
+
+		if (!p)
+			return -ENOMEM;
+
+		if (WARN_ON(pkvm_host_donate_hyp_share_ro(__pkvm_pa(p), VTD_PAGE_SIZE, true)))
+			return -EBUSY;
+		push_pkvm_memcache(mc, p, PAGE_SIZE, hyp_virt_to_phys);
+	}
+
+	return 0;
+}
+
+static void free_domain_memcache(struct dmar_domain *domain,
+				 struct pkvm_memcache *teardown_mc)
+{
+	struct pkvm_memcache *mc = &domain->mc;
+
+	while (mc->count) {
+		void *addr;
+		struct pkvm_page_range page_range;
+
+		page_range = pop_pkvm_memcache(mc, hyp_phys_to_virt);
+		addr = hyp_phys_to_virt(page_range.addr);
+
+		push_pkvm_memcache(teardown_mc, addr, PAGE_SIZE, pkvm_virt_to_host_gpa);
+		pkvm_hyp_donate_host(page_range.addr, VTD_PAGE_SIZE, true);
+	}
+}
+
+int pkvm_free_iommu_domain(struct dmar_domain *domain, struct pkvm_memcache *teardown_mc)
+{
+	if (atomic_cmpxchg(&domain->refcount, 1, 0) != 1) {
+		pkvm_err("%s: domain[pgd:%px] has users, refcount %d\n",
+			 __func__, domain->pgd, atomic_read(&domain->refcount));
+		return -EBUSY;
+	}
+
+	/* Unmap any remaining mappings. */
+	domain_unmap(domain, 0, DOMAIN_MAX_PFN(domain->gaw), NULL);
+	free_domain_memcache(domain, teardown_mc);
+	/*
+	 * pgd was not allocated through memcache, but its safe to return to
+	 * memcache as the teardown mc frees it the same way host driver frees
+	 * the pages.
+	 */
+	push_pkvm_memcache(teardown_mc, domain->pgd, PAGE_SIZE, pkvm_virt_to_host_gpa);
+
+	pkvm_dbg("%s: freeing domain[pgd: %px], freed pages: %lu\n",
+		 __func__, domain->pgd, teardown_mc->count);
+
+	pkvm_spin_lock(&iommu_domain_lock);
+	hash_del(&domain->hnode);
+	__clear_bit(domain->index, iommu_domains_bitmap);
+	memset(domain, 0, sizeof(struct dmar_domain));
+	pkvm_spin_unlock(&iommu_domain_lock);
+
+	return 0;
 }

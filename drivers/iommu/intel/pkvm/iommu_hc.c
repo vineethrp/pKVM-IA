@@ -490,7 +490,9 @@ int pkvm_iommu_free_domain(struct free_domain_data *data)
 		pkvm_err("%s: no domain exist for pgd: %px\n", __func__, pgd);
 		return -EINVAL;
 	}
-	ret = pkvm_free_iommu_domain(domain);
+
+	memset(&data->mc, 0, sizeof(data->mc));
+	ret = pkvm_free_iommu_domain(domain, &data->mc);
 	if (ret) {
 		pkvm_err("%s: failed to free the domain[pgd:%px] (err=%d)\n",
 			 __func__, pgd, ret);
@@ -501,4 +503,69 @@ int pkvm_iommu_free_domain(struct free_domain_data *data)
 	pkvm_hyp_donate_host(data->pgd_gpa, VTD_PAGE_SIZE, false);
 
 	return ret;
+}
+
+int pkvm_iommu_domain_mapping(struct domain_mapping_data *data)
+{
+	struct dmar_domain *domain;
+	u64 size;
+	int ret;
+
+	/* Check for possible overfows that may have security implications */
+	if (check_mul_overflow(data->nr_pages, VTD_PAGE_SIZE, &size))
+		return -EINVAL;
+	if (data->iov_pfn + data->nr_pages < data->iov_pfn)
+		return -EINVAL;
+	if ((data->iov_pfn << VTD_PAGE_SHIFT) < data->iov_pfn)
+		return -EINVAL;
+	if ((data->iov_pfn << VTD_PAGE_SHIFT) + size < data->iov_pfn)
+		return -EINVAL;
+	if ((data->phys_pfn << VTD_PAGE_SHIFT) < data->phys_pfn)
+		return -EINVAL;
+	if ((data->phys_pfn << VTD_PAGE_SHIFT) + size < data->phys_pfn)
+		return -EINVAL;
+
+	domain = pkvm_get_iommu_domain(pkvm_host_gpa_to_virt(data->pgd_gpa));
+
+	pkvm_spin_lock(&domain->lock);
+	if (data->mc.count) {
+		ret = refill_domain_memcache(domain, &data->mc);
+		if (ret) {
+			pkvm_err("pkvm: %s: failed to refill memcache for domain[pgd: %px] (err=%d)\n",
+				 __func__, domain->pgd, ret);
+			goto out_unlock;
+		}
+	}
+	if (domain->mc.count < __pkvm_pgtable_max_pages(data->nr_pages)) {
+		ret = -ENOMEM;
+		goto out_unlock;
+	}
+
+	ret = domain_map(domain, data->iov_pfn, data->phys_pfn, data->nr_pages, data->prot, 0);
+
+out_unlock:
+	pkvm_spin_unlock(&domain->lock);
+	pkvm_put_iommu_domain(domain);
+
+	return ret;
+}
+
+int pkvm_iommu_domain_unmapping(struct domain_unmapping_data *data)
+{
+	struct dmar_domain *domain;
+
+	domain = pkvm_get_iommu_domain(pkvm_host_gpa_to_virt(data->pgd_gpa));
+	if (!domain) {
+		pkvm_err("pkvm: %s, failed to get the domain [pgd:%llx]\n",
+				__func__, data->pgd_gpa);
+		return -EINVAL;
+	}
+
+	pkvm_spin_lock(&domain->lock);
+	domain_unmap(domain, data->start_pfn, data->last_pfn, NULL);
+	pkvm_spin_unlock(&domain->lock);
+
+	pkvm_put_iommu_domain(domain);
+
+	return 0;
 }
