@@ -8,6 +8,7 @@
 #include "pkvm/pkvm.h"
 #include "pkvm/debug.h"
 #include "../iommu.h"
+#include "iommu_domain.h"
 
 /*
  * IOMMU supported page size and page levels for second stage page table.
@@ -431,6 +432,16 @@ static int pkvm_handle_iommu_hypercall(void *in, void *out)
 	case pasid_teardown: {
 		struct pasid_teardown_data *data = &data_in->pasid_teardown;
 		ret = pkvm_iommu_pasid_teardown(data);
+		break;
+	}
+	case alloc_domain: {
+		struct alloc_domain_data *data = &data_in->alloc_domain;
+		ret = pkvm_iommu_alloc_domain(data);
+		break;
+	}
+	case free_domain: {
+		struct free_domain_data *data = &data_in->free_domain;
+		ret = pkvm_iommu_free_domain(data);
 		break;
 	}
 	default:
