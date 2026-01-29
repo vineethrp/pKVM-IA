@@ -103,6 +103,8 @@ int pv_pasid_table_setup(struct intel_iommu *iommu, struct device_domain_info *i
 			 u8 bus, u8 devfn);
 int pv_pasid_setup_fl(struct device_domain_info *info, phys_addr_t fsptptr,
 		      u32 pasid, u16 did, u16 old_did, int flags);
+int pv_pasid_setup_sl(struct device_domain_info *info, phys_addr_t ssptptr,
+		      u8 agaw, u32 pasid, u16 did, u16 old_did);
 #else /* __PKVM_HYP__ */
 
 bool is_dev_in_satc(u16 bdf);
