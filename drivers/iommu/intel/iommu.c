@@ -1317,7 +1317,7 @@ static void free_dmar_iommu(struct intel_iommu *iommu)
 	/* free context mapping */
 	free_context_table(iommu);
 
-	if (ecap_prs(iommu->ecap))
+	if (prs_supported(iommu))
 		intel_iommu_finish_prq(iommu);
 }
 
@@ -2104,6 +2104,15 @@ static int __init init_dmars(void)
 			continue;
 		}
 
+		if (pkvm_enabled()) {
+			if (ecap_prs(iommu->ecap))
+				pr_debug("iommu%d: PRS disabled as pKVM is enabled!\n",
+					 iommu->seq_id);
+			if (ecap_nest(iommu->ecap))
+				pr_debug("iommu%d: NEST disabled as pKVM is enabled!\n",
+					 iommu->seq_id);
+		}
+
 		/*
 		 * Find the max pasid size of all IOMMU's in the system.
 		 * We need to ensure the system pasid table is no bigger
@@ -2194,7 +2203,7 @@ static int __init init_dmars(void)
 
 		iommu_flush_write_buffer(iommu);
 
-		if (ecap_prs(iommu->ecap)) {
+		if (prs_supported(iommu)) {
 			/*
 			 * Call dmar_alloc_hwirq() with dmar_global_lock held,
 			 * could cause possible lock race condition.
@@ -2612,7 +2621,7 @@ static int intel_iommu_add(struct dmar_drhd_unit *dmaru)
 	intel_iommu_init_qi(iommu);
 	iommu_flush_write_buffer(iommu);
 
-	if (ecap_prs(iommu->ecap)) {
+	if (prs_supported(iommu)) {
 		ret = intel_iommu_enable_prq(iommu);
 		if (ret)
 			goto disable_iommu;
@@ -3376,6 +3385,9 @@ intel_iommu_domain_alloc_second_stage(struct device *dev,
 	     !ssads_supported(iommu)))
 		return ERR_PTR(-EOPNOTSUPP);
 
+	if (pkvm_enabled() && (flags & IOMMU_HWPT_ALLOC_DIRTY_TRACKING))
+		return ERR_PTR(-EOPNOTSUPP);
+
 	/* Legacy mode always supports second stage */
 	if (sm_supported(iommu) && !ecap_slts(iommu->ecap))
 		return ERR_PTR(-EOPNOTSUPP);
@@ -3759,7 +3771,8 @@ static bool intel_iommu_capable(struct device *dev, enum iommu_cap cap)
 	case IOMMU_CAP_ENFORCE_CACHE_COHERENCY:
 		return ecap_sc_support(info->iommu->ecap);
 	case IOMMU_CAP_DIRTY_TRACKING:
-		return ssads_supported(info->iommu);
+		/* pKVM doesn't yet support it. */
+		return !pkvm_enabled() && ssads_supported(info->iommu);
 	default:
 		return false;
 	}
@@ -3819,7 +3832,7 @@ static struct iommu_device *intel_iommu_probe_device(struct device *dev)
 					info->pasid_supported = features | 1;
 			}
 
-			if (info->ats_supported && ecap_prs(iommu->ecap) &&
+			if (info->ats_supported && prs_supported(iommu) &&
 			    ecap_pds(iommu->ecap) && pci_pri_supported(pdev))
 				info->pri_supported = 1;
 		}

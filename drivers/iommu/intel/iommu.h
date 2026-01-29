@@ -549,8 +549,16 @@ enum {
 #define ssads_supported(iommu) (sm_supported(iommu) &&                 \
 				ecap_slads((iommu)->ecap) &&           \
 				ecap_smpwc(iommu->ecap))
-#define nested_supported(iommu)	(sm_supported(iommu) &&			\
+
+/* pKVM doesn't yet support nested and PRS */
+#ifndef __PKVM_HYP__
+#define nested_supported(iommu)	(!pkvm_enabled() && sm_supported(iommu) &&\
 				 ecap_nest((iommu)->ecap))
+#define prs_supported(iommu)	(!pkvm_enabled() && ecap_prs((iommu)->ecap))
+#else
+#define nested_supported(iommu)	false
+#define prs_supported(iommu)	false
+#endif
 
 struct pasid_entry;
 struct pasid_state_entry;
