@@ -328633,7 +328633,7 @@ elf_symbol {
   name: "usb_get_intf"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x2d057260
+  crc: 0xbfdfba5b
   type_id: 0x4bcbea3e
   full_name: "usb_get_intf"
 }
@@ -328840,7 +328840,7 @@ elf_symbol {
   name: "usb_put_intf"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x4ffb9c0a
+  crc: 0xe175408c
   type_id: 0x18d9f669
   full_name: "usb_put_intf"
 }
