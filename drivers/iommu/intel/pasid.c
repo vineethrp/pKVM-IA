@@ -120,9 +120,6 @@ void intel_pasid_free_table(struct device *dev)
 
 #ifndef __PKVM_HYP__
 struct pasid_table *intel_pasid_get_table(struct device *dev)
-#else
-struct pasid_table *intel_pasid_get_table(struct pkvm_device *dev)
-#endif
 {
 	struct device_domain_info *info;
 
@@ -132,6 +129,28 @@ struct pasid_table *intel_pasid_get_table(struct pkvm_device *dev)
 
 	return info->pasid_table;
 }
+#else
+struct pasid_table *intel_pasid_get_table(struct pkvm_device *dev)
+{
+	struct device_domain_info *info = dev_iommu_priv_get(dev);
+	struct context_entry *context;
+	u32 pds;
+
+	if (!info || !info->iommu || !sm_supported(info->iommu))
+		return NULL;
+
+	context = iommu_context_addr(info->iommu, info->bus, info->devfn, false);
+	if (!context || !context_present(context))
+		return NULL;
+
+	pds = get_pasid_dir_size(context);
+	info->_pasid_table.table = __pkvm_va(context->lo & VTD_PAGE_MASK);
+	info->_pasid_table.max_pasid = pds << PASID_PDE_SHIFT;
+	info->pasid_table = &info->_pasid_table;
+
+	return info->pasid_table;
+}
+#endif
 
 #ifndef __PKVM_HYP__
 static int intel_pasid_get_dev_max_id(struct device *dev)
@@ -291,6 +310,23 @@ void intel_pasid_tear_down_entry(struct intel_iommu *iommu, struct pkvm_device *
 {
 	struct pasid_entry *pte;
 	u16 did, pgtt;
+
+#ifndef __PKVM_HYP__
+	if (pkvm_enabled()) {
+		struct device_domain_info *info = dev_iommu_priv_get(dev);
+		int ret;
+
+		if (WARN_ON(!info || !info->pasid_table))
+			return;
+
+		ret = pkvm_pasid_teardown(info, pasid);
+		if (ret)
+			pr_err("iommu%d: pkvm_pasid_teardown failed(err=%d)\n",
+			       iommu->seq_id, ret);
+
+		return;
+	}
+#endif
 
 	spin_lock(&iommu->lock);
 	pte = intel_pasid_get_entry(dev, pasid);
