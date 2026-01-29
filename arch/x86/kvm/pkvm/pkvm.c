@@ -367,6 +367,9 @@ static int postponed_per_vm_setup(struct kvm *kvm)
 		kvm->arch.notify_vmexit_flags = shared_kvm->arch.notify_vmexit_flags;
 	}
 
+	if (!pkvm_is_protected_vm(kvm))
+		kvm->arch.disabled_exits = shared_kvm->arch.disabled_exits;
+
 	pkvm_vm->postponed_setup_done = true;
 
 	return 0;
