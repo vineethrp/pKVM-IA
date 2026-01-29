@@ -105,6 +105,7 @@ int pv_pasid_setup_fl(struct device_domain_info *info, phys_addr_t fsptptr,
 		      u32 pasid, u16 did, u16 old_did, int flags);
 int pv_pasid_setup_sl(struct device_domain_info *info, phys_addr_t ssptptr,
 		      u8 agaw, u32 pasid, u16 did, u16 old_did);
+int pv_pasid_teardown(struct device_domain_info *info, u32 pasid);
 #else /* __PKVM_HYP__ */
 
 bool is_dev_in_satc(u16 bdf);
