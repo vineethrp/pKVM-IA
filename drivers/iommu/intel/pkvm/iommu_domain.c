@@ -69,7 +69,8 @@ void pkvm_put_iommu_domain(struct dmar_domain *domain)
 	WARN_ON_ONCE(atomic_dec_and_test(&domain->refcount));
 }
 
-struct dmar_domain *pkvm_alloc_iommu_domain(struct alloc_domain_data *data)
+struct dmar_domain *pkvm_alloc_iommu_domain(struct alloc_domain_data *data,
+					    bool need_iotlb_sync_map)
 {
 	void* pgd = pkvm_host_gpa_to_virt(data->pgd_gpa);
 	struct dmar_domain *domain;
@@ -91,6 +92,7 @@ struct dmar_domain *pkvm_alloc_iommu_domain(struct alloc_domain_data *data)
 		domain->use_first_level = data->use_first_level;
 		domain->iommu_superpage = data->iommu_superpage;
 		domain->iommu_coherency = data->iommu_coherency;
+		domain->iotlb_sync_map = need_iotlb_sync_map;
 		domain->agaw = data->agaw;
 		domain->gaw = data->gaw;
 		domain->max_addr = data->max_addr;
