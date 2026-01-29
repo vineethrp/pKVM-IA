@@ -101,6 +101,8 @@ int pv_context_mapping(struct intel_iommu *iommu, struct device_domain_info *inf
 		       u8 bus, u8 devfn, u64 pgd_gpa, u16 did, u8 agaw);
 int pv_pasid_table_setup(struct intel_iommu *iommu, struct device_domain_info *info,
 			 u8 bus, u8 devfn);
+int pv_pasid_setup_fl(struct device_domain_info *info, phys_addr_t fsptptr,
+		      u32 pasid, u16 did, u16 old_did, int flags);
 #else /* __PKVM_HYP__ */
 
 bool is_dev_in_satc(u16 bdf);
