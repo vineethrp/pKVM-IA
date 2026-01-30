@@ -787,6 +787,7 @@
   drm_calc_timestamping_constants
   drm_clflush_virt_range
   drm_color_lut_check
+  drm_colorop_set_next_property
   drm_compat_ioctl
   drm_connector_atomic_hdr_metadata_equal
   drm_connector_attach_colorspace_property
@@ -991,8 +992,12 @@
   drm_panel_unprepare
   drm_plane_add_size_hints_property
   drm_plane_cleanup
+  drm_plane_colorop_3dlut_init
+  drm_plane_colorop_ctm_3x4_init
+  drm_plane_colorop_curve_1d_lut_init
   drm_plane_create_alpha_property
   drm_plane_create_blend_mode_property
+  drm_plane_create_color_pipeline_property
   drm_plane_create_color_properties
   drm_plane_create_rotation_property
   drm_plane_create_scaling_filter_property

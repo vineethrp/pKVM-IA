@@ -271668,6 +271668,12 @@ function {
   parameter_id: 0x33756485
 }
 function {
+  id: 0x18611289
+  return_type_id: 0x48b5725f
+  parameter_id: 0x21faa609
+  parameter_id: 0x21faa609
+}
+function {
   id: 0x1864769e
   return_type_id: 0x48b5725f
   parameter_id: 0x23f09c34
@@ -283753,6 +283759,34 @@ function {
   parameter_id: 0x07dcdbe1
 }
 function {
+  id: 0x93c09dc2
+  return_type_id: 0x6720d32f
+  parameter_id: 0x3b04bead
+  parameter_id: 0x21faa609
+  parameter_id: 0x1b2ca025
+  parameter_id: 0x1c3dbe5a
+}
+function {
+  id: 0x93c09e9c
+  return_type_id: 0x6720d32f
+  parameter_id: 0x3b04bead
+  parameter_id: 0x21faa609
+  parameter_id: 0x1b2ca025
+  parameter_id: 0x1c3dbe5a
+  parameter_id: 0x0cb8d85b
+  parameter_id: 0x1c3dbe5a
+}
+function {
+  id: 0x93c0a0c6
+  return_type_id: 0x6720d32f
+  parameter_id: 0x3b04bead
+  parameter_id: 0x21faa609
+  parameter_id: 0x1b2ca025
+  parameter_id: 0x1c3dbe5a
+  parameter_id: 0xf5d28572
+  parameter_id: 0x1c3dbe5a
+}
+function {
   id: 0x93c0fc82
   return_type_id: 0x6720d32f
   parameter_id: 0x3760766d
@@ -289725,6 +289759,13 @@ function {
   return_type_id: 0x6720d32f
   parameter_id: 0x18bd6530
   parameter_id: 0x030b9acf
+}
+function {
+  id: 0x9ba3aabc
+  return_type_id: 0x6720d32f
+  parameter_id: 0x1b2ca025
+  parameter_id: 0x3c6a6bbc
+  parameter_id: 0x6720d32f
 }
 function {
   id: 0x9ba6ac88
@@ -308833,6 +308874,15 @@ elf_symbol {
   full_name: "drm_color_lut_check"
 }
 elf_symbol {
+  id: 0x15fced3c
+  name: "drm_colorop_set_next_property"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x964fec29
+  type_id: 0x18611289
+  full_name: "drm_colorop_set_next_property"
+}
+elf_symbol {
   id: 0x54a3e32d
   name: "drm_compat_ioctl"
   is_defined: true
@@ -310750,6 +310800,33 @@ elf_symbol {
   full_name: "drm_plane_cleanup"
 }
 elf_symbol {
+  id: 0x4e2311a1
+  name: "drm_plane_colorop_3dlut_init"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x8c0cd29c
+  type_id: 0x93c09e9c
+  full_name: "drm_plane_colorop_3dlut_init"
+}
+elf_symbol {
+  id: 0x3f281067
+  name: "drm_plane_colorop_ctm_3x4_init"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x1f05b583
+  type_id: 0x93c09dc2
+  full_name: "drm_plane_colorop_ctm_3x4_init"
+}
+elf_symbol {
+  id: 0xe30a3106
+  name: "drm_plane_colorop_curve_1d_lut_init"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x0a230e1e
+  type_id: 0x93c0a0c6
+  full_name: "drm_plane_colorop_curve_1d_lut_init"
+}
+elf_symbol {
   id: 0xbdb562b1
   name: "drm_plane_create_alpha_property"
   is_defined: true
@@ -310766,6 +310843,15 @@ elf_symbol {
   crc: 0x247e4c13
   type_id: 0x9a5ddebe
   full_name: "drm_plane_create_blend_mode_property"
+}
+elf_symbol {
+  id: 0x9ff642a7
+  name: "drm_plane_create_color_pipeline_property"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x6957aa7b
+  type_id: 0x9ba3aabc
+  full_name: "drm_plane_create_color_pipeline_property"
 }
 elf_symbol {
   id: 0x34b80a32
@@ -334923,6 +335009,7 @@ interface {
   symbol_id: 0xe2f527ca
   symbol_id: 0x43c6c5b5
   symbol_id: 0xfbad9f65
+  symbol_id: 0x15fced3c
   symbol_id: 0x54a3e32d
   symbol_id: 0x3f2eb351
   symbol_id: 0xb091c3a6
@@ -335136,8 +335223,12 @@ interface {
   symbol_id: 0x046720ab
   symbol_id: 0x978551ec
   symbol_id: 0x3c07bbff
+  symbol_id: 0x4e2311a1
+  symbol_id: 0x3f281067
+  symbol_id: 0xe30a3106
   symbol_id: 0xbdb562b1
   symbol_id: 0x1f35127a
+  symbol_id: 0x9ff642a7
   symbol_id: 0x34b80a32
   symbol_id: 0x93ab4714
   symbol_id: 0x198a2313
