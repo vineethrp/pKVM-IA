@@ -134,6 +134,8 @@ static inline bool is_iommu_mmio_range(unsigned long phys)
 	return !!iommu_from_phys(phys);
 }
 
+struct cache_tag *pkvm_alloc_cache_tag(void);
+void pkvm_free_cache_tag(struct cache_tag *cache_tag);
 /*
  * Get the page donated by host for constructing
  * translation structures(context/pasid).

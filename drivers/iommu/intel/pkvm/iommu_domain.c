@@ -103,6 +103,7 @@ struct dmar_domain *pkvm_alloc_iommu_domain(struct alloc_domain_data *data)
 	if (index < MAX_IOMMU_DOMAIN_NUM) {
 		__set_bit(index, iommu_domains_bitmap);
 		domain = &iommu_domains[index];
+		INIT_LIST_HEAD(&domain->cache_tags);
 		domain->pgd = pgd;
 		domain->use_first_level = data->use_first_level;
 		domain->iommu_superpage = data->iommu_superpage;
@@ -111,8 +112,10 @@ struct dmar_domain *pkvm_alloc_iommu_domain(struct alloc_domain_data *data)
 		domain->gaw = data->gaw;
 		domain->max_addr = data->max_addr;
 		domain->index = index;
+		domain->qi_batch = &domain->_qi_batch;
 		atomic_set(&domain->refcount, 1);
 		pkvm_spin_lock_init(&domain->lock);
+		pkvm_spin_lock_init(&domain->cache_lock);
 		hash_add(iommu_domain_hasht, &domain->hnode, (u64)pgd);
 		pkvm_dbg("%s: allocated domain pgd: %px\n", __func__, pgd);
 	} else {
