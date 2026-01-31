@@ -1515,7 +1515,7 @@ int domain_context_mapping_one(struct dmar_domain *domain,
 #ifndef __PKVM_HYP__
 	copied_context_tear_down(iommu, context, bus, devfn);
 #else
-	ret= pkvm_get_domain(pgd, did);
+	ret= pkvm_get_domain(pgd, did, info, IOMMU_NO_PASID);
 	if (ret) {
 		pr_err("iommu%d: failed to get the domain for pgd: %p\n",
 		       iommu->seq_id, pgd);
@@ -1841,7 +1841,7 @@ void domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
 	if (sm)
 		pasid_free_table(pasid_dir, pasid_dir_sz);
 	else
-		pkvm_put_domain(pgd, did);
+		pkvm_put_domain(pgd, did, info, IOMMU_NO_PASID);
 #endif
 }
 

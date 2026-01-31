@@ -134,8 +134,16 @@ static inline bool is_iommu_mmio_range(unsigned long phys)
 	return !!iommu_from_phys(phys);
 }
 
+struct device_domain_info;
+struct dmar_domain;
+
 struct cache_tag *pkvm_alloc_cache_tag(void);
 void pkvm_free_cache_tag(struct cache_tag *cache_tag);
+int pkvm_cache_assign_domain(struct dmar_domain *domain, u16 did,
+			     struct device_domain_info *info, u32 pasid);
+void pkvm_cache_unassign_domain(struct dmar_domain *domain, u16 did,
+				struct device_domain_info *info, u32 pasid);
+
 /*
  * Get the page donated by host for constructing
  * translation structures(context/pasid).
@@ -147,8 +155,8 @@ void pkvm_free_cache_tag(struct cache_tag *cache_tag);
 	ts_page;			\
 })
 
-int pkvm_get_domain(void *pgd, int did);
-void pkvm_put_domain(void *pgd, int did);
+int pkvm_get_domain(void *pgd, int did, struct device_domain_info *info, u32 pasid);
+void pkvm_put_domain(void *pgd, int did, struct device_domain_info *info, u32 pasid);
 
 int pkvm_intel_iommu_init(void);
 #endif /* !__PKVM_HYP__ */
