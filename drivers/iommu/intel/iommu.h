@@ -671,9 +671,9 @@ struct dmar_domain {
 	struct list_head dev_pasids;	/* all attached pasids */
 
 	spinlock_t cache_lock;		/* Protect the cache tag list */
+#endif
 	struct list_head cache_tags;	/* Cache tag list */
 	struct qi_batch *qi_batch;	/* Batched QI descriptors */
-#endif
 
 	int		iommu_superpage;/* Level of superpages supported:
 					   0 == 4KiB (no superpages), 1 == 2MiB,
@@ -743,6 +743,8 @@ struct dmar_domain {
 	 * on this domain.
 	 */
 	pkvm_spinlock_t lock;
+	pkvm_spinlock_t cache_lock;		/* Protect the cache tag list */
+	struct qi_batch _qi_batch;		/* domain->qi_batch = &domain->_qi_batch */
 
 	struct hlist_node hnode;
 #endif /* !__PKVM_HYP__ */
@@ -935,6 +937,37 @@ struct device_domain_info {
 	struct pasid_table _pasid_table;
 	struct pasid_table *pasid_table; /* pasid table */
 };
+
+static inline void pkvm_populate_pfsid(struct device_domain_info *info)
+{
+	if (info->ats_supported && ecap_dit(info->iommu->ecap)) {
+		/*
+		 * Device is in SATC and optimistically assuming that a well crafted SATC
+		 * would contain only physical functions, its safe to set pfsid = bdf.
+		 * TODO: We should probably be verifying SATC for existence of only
+		 * physical functions during pkvm initialization.
+		 */
+		info->pfsid = PCI_DEVID(info->bus, info->devfn);
+	} else {
+		info->pfsid = 0;
+	}
+}
+
+static inline void pkvm_populate_dev_info_from_ce(struct device_domain_info *info,
+						  struct context_entry *ce)
+{
+	/*
+	 * Derive the device's ATS state from the live context entry so
+	 * the device-TLB flush below is driven by hardware state rather
+	 * than a host-supplied flag. Bit 2 is CE.DTE in scalable mode;
+	 * in legacy mode the only translation type that sets it is
+	 * CONTEXT_TT_DEV_IOTLB, so the same test is valid for both.
+	 */
+	info->ats_supported = !!(ce->lo & BIT_ULL(2));
+	info->ats_enabled = info->ats_supported;
+
+	pkvm_populate_pfsid(info);
+}
 #endif /* !__PKVM_HYP__ */
 
 static inline void __iommu_flush_cache(
@@ -1442,6 +1475,7 @@ struct cache_tag {
 	struct list_head node;
 	enum cache_tag_type type;
 	struct intel_iommu *iommu;
+#ifndef __PKVM_HYP__
 	/*
 	 * The @dev field represents the location of the cache. For IOTLB, it
 	 * resides on the IOMMU hardware. @dev stores the device pointer to
@@ -1449,17 +1483,33 @@ struct cache_tag {
 	 * @dev stores the device pointer to that endpoint.
 	 */
 	struct device *dev;
+#else
+	u8 bus;
+	u8 devfn;
+	u16 pfsid;
+	u8 ats_qdep;
+	unsigned int index;
+#endif
 	u16 domain_id;
 	ioasid_t pasid;
 	unsigned int users;
 };
 
+#ifndef __PKVM_HYP__
 int cache_tag_assign(struct dmar_domain *domain, u16 did, struct device *dev,
 		     ioasid_t pasid, enum cache_tag_type type);
 int cache_tag_assign_domain(struct dmar_domain *domain,
 			    struct device *dev, ioasid_t pasid);
 void cache_tag_unassign_domain(struct dmar_domain *domain,
 			       struct device *dev, ioasid_t pasid);
+#else
+int cache_tag_assign(struct dmar_domain *domain, u16 did, struct pkvm_device *dev,
+		     ioasid_t pasid, enum cache_tag_type type);
+int cache_tag_assign_domain(struct dmar_domain *domain,
+			    u16 did, struct pkvm_device *dev, ioasid_t pasid);
+void cache_tag_unassign_domain(struct dmar_domain *domain,
+			       u16 did, struct pkvm_device *dev, ioasid_t pasid);
+#endif
 void cache_tag_flush_range(struct dmar_domain *domain, unsigned long start,
 			   unsigned long end, int ih);
 void cache_tag_flush_all(struct dmar_domain *domain);
@@ -1548,12 +1598,18 @@ struct context_entry *iommu_context_addr(struct intel_iommu *iommu, u8 bus,
 extern const struct iommu_ops intel_iommu_ops;
 extern const struct iommu_domain_ops intel_fs_paging_domain_ops;
 extern const struct iommu_domain_ops intel_ss_paging_domain_ops;
+#endif /* !__PKVM_HYP__ */
 
 static inline bool intel_domain_is_fs_paging(struct dmar_domain *domain)
 {
+#ifndef __PKVM_HYP__
 	return domain->domain.ops == &intel_fs_paging_domain_ops;
+#else
+	return domain->use_first_level;
+#endif
 }
 
+#ifndef __PKVM_HYP__
 static inline bool intel_domain_is_ss_paging(struct dmar_domain *domain)
 {
 	return domain->domain.ops == &intel_ss_paging_domain_ops;

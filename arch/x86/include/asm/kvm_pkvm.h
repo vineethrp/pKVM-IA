@@ -62,8 +62,6 @@ struct clear_ce_data {
 	u8 bus;
 	u8 devfn;
 	u8 ats_qdep;
-	u8 ats_enabled: 1;
-	u8 ats_supported: 1;
 };
 
 struct set_lm_ce_data {
@@ -74,7 +72,6 @@ struct set_lm_ce_data {
 	u8 bus;
 	u8 devfn;
 	u8 ats_qdep;
-	u8 ats_enabled: 1;
 	u8 ats_supported: 1;
 };
 
@@ -86,7 +83,6 @@ struct set_sm_ce_data {
 	u8 bus;
 	u8 devfn;
 	u8 ats_qdep;
-	u8 ats_enabled: 1;
 	u8 ats_supported: 1;
 	u8 pasid_supported: 3;
 	u8 pasid_enabled: 1;
@@ -103,8 +99,6 @@ struct pasid_setup_fl_data {
 	u8 bus;
 	u8 devfn;
 	u8 ats_qdep;
-	u8 ats_enabled: 1;
-	u8 ats_supported: 1;
 };
 
 struct pasid_setup_sl_data {
@@ -117,8 +111,6 @@ struct pasid_setup_sl_data {
 	u8 bus;
 	u8 devfn;
 	u8 ats_qdep;
-	u8 ats_enabled: 1;
-	u8 ats_supported: 1;
 };
 
 struct pasid_teardown_data {
@@ -127,8 +119,6 @@ struct pasid_teardown_data {
 	u8 bus;
 	u8 devfn;
 	u8 ats_qdep;
-	u8 ats_enabled: 1;
-	u8 ats_supported: 1;
 };
 #endif
 
