@@ -523,9 +523,10 @@ int pkvm_intel_iommu_init(void)
 	return 0;
 }
 
-int pkvm_get_domain(void *pgd, int did)
+int pkvm_get_domain(void *pgd, int did, struct device_domain_info *info, u32 pasid)
 {
 	struct dmar_domain *domain;
+	int ret;
 
 	if (did == FLPT_DEFAULT_DID)
 		return 0;
@@ -536,15 +537,22 @@ int pkvm_get_domain(void *pgd, int did)
 			 __func__, pgd);
 		return -EFAULT;
 	}
+
+	ret = pkvm_cache_assign_domain(domain, did, info, pasid);
+	if (ret) {
+		pkvm_put_iommu_domain(domain);
+		return ret;
+	}
 	return 0;
 }
 
-void pkvm_put_domain(void *pgd, int did)
+void pkvm_put_domain(void *pgd, int did, struct device_domain_info *info, u32 pasid)
 {
 	struct dmar_domain *domain;
 	if (did == FLPT_DEFAULT_DID)
 		return;
 	domain = pkvm_get_iommu_domain_noref(pgd);
 	BUG_ON(!domain);
+	pkvm_cache_unassign_domain(domain, did, info, pasid);
 	pkvm_put_iommu_domain(domain);
 }

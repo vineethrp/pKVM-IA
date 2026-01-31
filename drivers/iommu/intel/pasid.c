@@ -338,7 +338,7 @@ void intel_pasid_tear_down_entry(struct intel_iommu *iommu, struct device *dev,
 	if (!fault_ignore)
 		intel_iommu_drain_pasid_prq(dev, pasid);
 #else
-	pkvm_put_domain(pgd, did);
+	pkvm_put_domain(pgd, did, dev_iommu_priv_get(dev), pasid);
 #endif
 }
 
@@ -475,7 +475,8 @@ int intel_pasid_setup_first_level(struct intel_iommu *iommu, struct device *dev,
 	}
 
 #ifdef __PKVM_HYP__
-	ret = pkvm_get_domain(__pkvm_va(fsptptr), did);
+	ret = pkvm_get_domain(__pkvm_va(fsptptr), did,
+			      dev_iommu_priv_get(dev), pasid);
 	if (ret) {
 		pr_err("iommu%d: failed to get the domain for did: %d, fsptptr: %llx\n",
 		       iommu->seq_id, did, fsptptr);
@@ -556,7 +557,8 @@ int intel_pasid_replace_first_level(struct intel_iommu *iommu,
 	else if (pgtt == PASID_ENTRY_PGTT_SL_ONLY)
 		old_pgd = __pkvm_va(pasid_get_slptr(pte));
 
-	ret = pkvm_get_domain(__pkvm_va(fsptptr), did);
+	ret = pkvm_get_domain(__pkvm_va(fsptptr), did,
+			      dev_iommu_priv_get(dev), pasid);
 	if (ret) {
 		pr_err("iommu%d: failed to get the domain for did: %d, fsptptr: %llx\n",
 		       iommu->seq_id, did, fsptptr);
@@ -573,7 +575,7 @@ int intel_pasid_replace_first_level(struct intel_iommu *iommu,
 #ifndef __PKVM_HYP__
 	intel_iommu_drain_pasid_prq(dev, pasid);
 #else
-	pkvm_put_domain(old_pgd, old_did);
+	pkvm_put_domain(old_pgd, old_did, dev_iommu_priv_get(dev), pasid);
 #endif
 
 	return 0;
@@ -666,7 +668,8 @@ int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 	}
 
 #ifdef __PKVM_HYP__
-	ret = pkvm_get_domain(domain->pgd, did);
+	ret = pkvm_get_domain(domain->pgd, did,
+			      dev_iommu_priv_get(dev), pasid);
 	if (ret)
 		return ret;
 #endif
@@ -759,7 +762,8 @@ int intel_pasid_replace_second_level(struct intel_iommu *iommu,
 	else if (pgtt == PASID_ENTRY_PGTT_SL_ONLY)
 		old_pgd = __pkvm_va(pasid_get_slptr(pte));
 
-	ret = pkvm_get_domain(domain->pgd, did);
+	ret = pkvm_get_domain(domain->pgd, did,
+			      dev_iommu_priv_get(dev), pasid);
 	if (ret) {
 		pr_err("iommu%d: failed to get the domain for did: %d, pgd: %p\n",
 		       iommu->seq_id, did, domain->pgd);
@@ -776,7 +780,7 @@ int intel_pasid_replace_second_level(struct intel_iommu *iommu,
 #ifndef __PKVM_HYP__
 	intel_iommu_drain_pasid_prq(dev, pasid);
 #else
-	pkvm_put_domain(old_pgd, old_did);
+	pkvm_put_domain(old_pgd, old_did, dev_iommu_priv_get(dev), pasid);
 #endif
 
 	return 0;

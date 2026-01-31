@@ -36,3 +36,38 @@ void pkvm_free_cache_tag(struct cache_tag *cache_tag)
 	memset(cache_tag, 0, sizeof(struct cache_tag));
 	pkvm_spin_unlock(&cache_tag_lock);
 }
+
+int pkvm_cache_assign_domain(struct dmar_domain *domain, u16 did,
+			     struct device_domain_info *info, u32 pasid)
+{
+	struct dev_iommu dev_iommu = { 0 };
+	struct device dev = { 0 };
+	int ret;
+
+	dev_iommu.priv = (void *)info;
+	dev.iommu = &dev_iommu;
+
+	ret = cache_tag_assign(domain, did, &dev, pasid, CACHE_TAG_IOTLB);
+
+	if (!ret && info->ats_supported) {
+		ret = cache_tag_assign(domain, did, &dev, pasid, CACHE_TAG_DEVTLB);
+		if (ret)
+			cache_tag_unassign(domain, did, &dev, pasid, CACHE_TAG_IOTLB);
+	}
+
+	return ret;
+}
+
+void pkvm_cache_unassign_domain(struct dmar_domain *domain, u16 did,
+				struct device_domain_info *info, u32 pasid)
+{
+	struct dev_iommu dev_iommu = { 0 };
+	struct device dev = { 0 };
+
+	dev_iommu.priv = (void *)info;
+	dev.iommu = &dev_iommu;
+
+	cache_tag_unassign(domain, did, &dev, pasid, CACHE_TAG_IOTLB);
+	if (info->ats_supported)
+		cache_tag_unassign(domain, did, &dev, pasid, CACHE_TAG_DEVTLB);
+}
