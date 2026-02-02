@@ -525,3 +525,29 @@ int pkvm_intel_iommu_init(void)
 	pkvm_register_iommu_ops(&iommu_ops);
 	return 0;
 }
+
+int pkvm_get_domain(void *pgd, int did)
+{
+	struct dmar_domain *domain;
+
+	if (did == FLPT_DEFAULT_DID)
+		return 0;
+
+	domain = pkvm_get_iommu_domain(pgd);
+	if (!domain) {
+		pkvm_err("%s: Failed to locate domain with pgd: %px\n",
+			 __func__, pgd);
+		return -EFAULT;
+	}
+	return 0;
+}
+
+void pkvm_put_domain(void *pgd, int did)
+{
+	struct dmar_domain *domain;
+	if (did == FLPT_DEFAULT_DID)
+		return;
+	domain = pkvm_get_iommu_domain_noref(pgd);
+	BUG_ON(!domain);
+	pkvm_put_iommu_domain(domain);
+}
