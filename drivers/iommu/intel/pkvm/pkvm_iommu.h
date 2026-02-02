@@ -142,6 +142,9 @@ static inline bool is_iommu_mmio_range(unsigned long phys)
 	ts_page;			\
 })
 
+int pkvm_get_domain(void *pgd, int did);
+void pkvm_put_domain(void *pgd, int did);
+
 int pkvm_intel_iommu_init(void);
 #endif /* !__PKVM_HYP__ */
 
