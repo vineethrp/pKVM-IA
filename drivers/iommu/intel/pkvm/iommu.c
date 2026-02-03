@@ -530,6 +530,7 @@ int pkvm_intel_iommu_init(void)
 			return ret;
 	}
 	pkvm_register_iommu_ops(&iommu_ops);
+	init_pt_domain();
 	return 0;
 }
 
@@ -538,8 +539,10 @@ int pkvm_get_domain(void *pgd, int did, struct device_domain_info *info, u32 pas
 	struct dmar_domain *domain;
 	int ret;
 
-	if (did == FLPT_DEFAULT_DID)
+	if (did == FLPT_DEFAULT_DID) {
+		pkvm_cache_assign_domain(&pt_domain, did, info, pasid);
 		return 0;
+	}
 
 	domain = pkvm_get_iommu_domain(pgd);
 	if (!domain) {
@@ -559,10 +562,18 @@ int pkvm_get_domain(void *pgd, int did, struct device_domain_info *info, u32 pas
 void pkvm_put_domain(void *pgd, int did, struct device_domain_info *info, u32 pasid)
 {
 	struct dmar_domain *domain;
-	if (did == FLPT_DEFAULT_DID)
+	if (did == FLPT_DEFAULT_DID) {
+		pkvm_cache_unassign_domain(&pt_domain, did, info, pasid);
 		return;
+	}
 	domain = pkvm_get_iommu_domain_noref(pgd);
 	BUG_ON(!domain);
 	pkvm_cache_unassign_domain(domain, did, info, pasid);
 	pkvm_put_iommu_domain(domain);
+}
+
+void pkvm_iommu_pt_flush(unsigned long vaddr, unsigned long size)
+{
+	if (pt_domain.qi_batch)
+		cache_tag_flush_range(&pt_domain, vaddr, vaddr + size - 1, 0);
 }

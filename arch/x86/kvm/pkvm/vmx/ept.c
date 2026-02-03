@@ -166,6 +166,7 @@ static void host_ept_flush_tlb(struct pkvm_pgtable *pgt,
 		kvm_make_request(KVM_REQ_TLB_FLUSH_CURRENT, vcpu);
 		pkvm_kick_vcpu(vcpu);
 	}
+	pkvm_iommu_pt_flush(vaddr, size);
 }
 
 static u64 ept_pgstate_mask(void)
