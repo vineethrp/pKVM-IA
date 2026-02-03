@@ -3209,6 +3209,8 @@
   typec_get_drvdata
   typec_get_negotiated_svdm_version
   typec_match_altmode
+  typec_mode_selection_delete
+  typec_mode_selection_start
   typec_mux_get_drvdata
   typec_mux_put
   typec_mux_register

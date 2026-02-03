@@ -286833,6 +286833,13 @@ function {
   parameter_id: 0x2f73da3b
 }
 function {
+  id: 0x9890b7e7
+  return_type_id: 0x6720d32f
+  parameter_id: 0x105c8027
+  parameter_id: 0x4585663f
+  parameter_id: 0x4585663f
+}
+function {
   id: 0x98918d07
   return_type_id: 0x6720d32f
   parameter_id: 0x18e64f74
@@ -329614,6 +329621,24 @@ elf_symbol {
   full_name: "typec_match_altmode"
 }
 elf_symbol {
+  id: 0x0d00053d
+  name: "typec_mode_selection_delete"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xb6e014e3
+  type_id: 0x148f719a
+  full_name: "typec_mode_selection_delete"
+}
+elf_symbol {
+  id: 0x99654493
+  name: "typec_mode_selection_start"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x8ecd1640
+  type_id: 0x9890b7e7
+  full_name: "typec_mode_selection_start"
+}
+elf_symbol {
   id: 0x8fafe0a6
   name: "typec_mux_get_drvdata"
   is_defined: true
@@ -337178,6 +337203,8 @@ interface {
   symbol_id: 0x84b20708
   symbol_id: 0xab1410be
   symbol_id: 0xb8c4fc82
+  symbol_id: 0x0d00053d
+  symbol_id: 0x99654493
   symbol_id: 0x8fafe0a6
   symbol_id: 0x6d4f7368
   symbol_id: 0x29215b38
