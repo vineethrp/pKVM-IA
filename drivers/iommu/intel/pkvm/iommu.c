@@ -399,9 +399,9 @@ static int pkvm_handle_iommu_hypercall(void *in, void *out)
 	int ret;
 
 	switch (data_in->hc_num) {
-	case qi_submit: {
-		struct qi_submit_data *data = &data_in->qi_submit;
-		ret = pkvm_iommu_qi_submit(data);
+	case iec_flush: {
+		struct iec_flush_data *data = &data_in->iec_flush;
+		ret = pkvm_iommu_iec_flush(data);
 		break;
 	}
 	case clear_ce: {

@@ -103,17 +103,16 @@ int __init pkvm_host_init_iommu(void)
 	return intel_iommu_init();
 }
 
-int pv_qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
-		      unsigned int count, unsigned long options)
+int pv_iec_flush(struct intel_iommu *iommu, bool global, int index, int mask)
 {
 	union pkvm_hc_data data_in = { 0 }, data_out;
 	struct iommu_hc_data *data = (struct iommu_hc_data *)&data_in;
 
-	data->qi_submit.phys = iommu->reg_phys;
-	data->qi_submit.desc_gpa = virt_to_phys(desc);
-	data->qi_submit.count = count;
-	data->qi_submit.options = options;
-	data->hc_num = qi_submit;
+	data->iec_flush.phys = iommu->reg_phys;
+	data->iec_flush.global = global;
+	data->iec_flush.index = index;
+	data->iec_flush.mask = mask;
+	data->hc_num = iec_flush;
 	return pkvm_hypercall_inout(iommu_hypercall, &data_in, &data_out);
 }
 
