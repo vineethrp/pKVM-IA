@@ -242,6 +242,7 @@
   cec_allocate_adapter
   cec_delete_adapter
   cec_fill_conn_info_from_drm
+  cec_get_edid_phys_addr
   cec_notifier_cec_adap_register
   cec_notifier_cec_adap_unregister
   cec_notifier_conn_register
@@ -249,6 +250,8 @@
   cec_notifier_set_phys_addr
   cec_received_msg_ts
   cec_register_adapter
+  cec_s_conn_info
+  cec_s_phys_addr
   cec_transmit_attempt_done_ts
   cec_unregister_adapter
   __check_object_size
