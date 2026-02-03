@@ -1439,10 +1439,6 @@ int qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
 		return 0;
 
 #ifndef __PKVM_HYP__
-	if (pkvm_enabled()) {
-		return pv_qi_submit_sync(iommu, desc, count, options);
-	}
-
 	type = desc->qw0 & GENMASK_ULL(3, 0);
 
 	if ((type == QI_IOTLB_TYPE || type == QI_EIOTLB_TYPE) &&
@@ -1564,6 +1560,13 @@ void qi_global_iec(struct intel_iommu *iommu)
 {
 	struct qi_desc desc;
 
+#ifndef __PKVM_HYP__
+	if (pkvm_enabled()) {
+		pv_iec_flush(iommu, true, 0, 0);
+		return;
+	}
+#endif
+
 	desc.qw0 = QI_IEC_TYPE;
 	desc.qw1 = 0;
 	desc.qw2 = 0;
@@ -1571,6 +1574,25 @@ void qi_global_iec(struct intel_iommu *iommu)
 
 	/* should never fail */
 	qi_submit_sync(iommu, &desc, 1, 0);
+}
+
+int qi_flush_iec(struct intel_iommu *iommu, int index, int mask)
+{
+	struct qi_desc desc;
+
+#ifndef __PKVM_HYP__
+	if (pkvm_enabled()) {
+		return pv_iec_flush(iommu, false, index, mask);
+	}
+#endif
+
+	desc.qw0 = QI_IEC_IIDEX(index) | QI_IEC_TYPE | QI_IEC_IM(mask)
+		   | QI_IEC_SELECTIVE;
+	desc.qw1 = 0;
+	desc.qw2 = 0;
+	desc.qw3 = 0;
+
+	return qi_submit_sync(iommu, &desc, 1, 0);
 }
 
 void qi_flush_context(struct intel_iommu *iommu, u16 did, u16 sid, u8 fm,

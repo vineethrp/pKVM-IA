@@ -95,8 +95,7 @@ struct intel_iommu;
 struct device_domain_info;
 struct dmar_domain;
 
-int pv_qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
-		      unsigned int count, unsigned long options);
+int pv_iec_flush(struct intel_iommu *iommu, bool global, int index, int mask);
 int pv_context_clear(u64 phys, u8 bus, u8 devfn, struct device_domain_info *info);
 int pv_context_mapping(struct intel_iommu *iommu, struct device_domain_info *info,
 		       u8 bus, u8 devfn, u64 pgd_gpa, u16 did, u8 agaw);
