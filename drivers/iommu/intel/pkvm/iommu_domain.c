@@ -19,6 +19,14 @@ static DEFINE_HASHTABLE(iommu_domain_hasht, 8);
 static DECLARE_BITMAP(iommu_domains_bitmap, MAX_IOMMU_DOMAIN_NUM);
 static struct dmar_domain iommu_domains[MAX_IOMMU_DOMAIN_NUM];
 static pkvm_spinlock_t iommu_domain_lock = __PKVM_SPINLOCK_UNLOCKED;
+struct dmar_domain pt_domain;
+
+void init_pt_domain(void)
+{
+	INIT_LIST_HEAD(&pt_domain.cache_tags);
+	pkvm_spin_lock_init(&pt_domain.cache_lock);
+	WRITE_ONCE(pt_domain.qi_batch, &pt_domain._qi_batch);
+}
 
 static inline struct dmar_domain *__pkvm_get_iommu_domain_locked(void* pgd, bool inc_ref)
 {

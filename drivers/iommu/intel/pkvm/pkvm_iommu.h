@@ -172,6 +172,7 @@ void pkvm_cache_unassign_domain(struct dmar_domain *domain, u16 did,
 
 int pkvm_get_domain(void *pgd, int did, struct device_domain_info *info, u32 pasid);
 void pkvm_put_domain(void *pgd, int did, struct device_domain_info *info, u32 pasid);
+void pkvm_iommu_pt_flush(unsigned long vaddr, unsigned long size);
 
 int pkvm_intel_iommu_init(void);
 #endif /* !__PKVM_HYP__ */
