@@ -754,6 +754,11 @@ pointer_reference {
   pointee_type_id: 0x2669d715
 }
 pointer_reference {
+  id: 0x030b4118
+  kind: POINTER
+  pointee_type_id: 0x266de2fd
+}
+pointer_reference {
   id: 0x030b9acf
   kind: POINTER
   pointee_type_id: 0x266e8da3
@@ -7449,6 +7454,11 @@ pointer_reference {
   pointee_type_id: 0x6594ecd4
 }
 pointer_reference {
+  id: 0x13f857e5
+  kind: POINTER
+  pointee_type_id: 0x65a1b90a
+}
+pointer_reference {
   id: 0x13fd63de
   kind: POINTER
   pointee_type_id: 0x65b569e7
@@ -13812,6 +13822,11 @@ pointer_reference {
   id: 0x2cb8b225
   kind: POINTER
   pointee_type_id: 0x98a22e08
+}
+pointer_reference {
+  id: 0x2cba2cd4
+  kind: POINTER
+  pointee_type_id: 0x98a855cd
 }
 pointer_reference {
   id: 0x2cbb953f
@@ -21749,6 +21764,11 @@ pointer_reference {
   pointee_type_id: 0xfaeafe16
 }
 pointer_reference {
+  id: 0x343261d5
+  kind: POINTER
+  pointee_type_id: 0xfa8961c9
+}
+pointer_reference {
   id: 0x34334e6d
   kind: POINTER
   pointee_type_id: 0xfa8ddf2a
@@ -21792,6 +21812,11 @@ pointer_reference {
   id: 0x3443caef
   kind: POINTER
   pointee_type_id: 0xfb4fcd23
+}
+pointer_reference {
+  id: 0x34471315
+  kind: POINTER
+  pointee_type_id: 0xfb5caac9
 }
 pointer_reference {
   id: 0x344a8f68
@@ -23532,6 +23557,11 @@ pointer_reference {
   id: 0x37fc3fc4
   kind: POINTER
   pointee_type_id: 0xf5b0198f
+}
+pointer_reference {
+  id: 0x37fc9b61
+  kind: POINTER
+  pointee_type_id: 0xf5b28b19
 }
 pointer_reference {
   id: 0x37fdbcb1
@@ -26172,6 +26202,11 @@ pointer_reference {
   id: 0x3ea6bd8c
   kind: POINTER
   pointee_type_id: 0xd0da10ac
+}
+pointer_reference {
+  id: 0x3eacd4c8
+  kind: POINTER
+  pointee_type_id: 0xd0f3b5bf
 }
 pointer_reference {
   id: 0x3ead5ba3
@@ -31749,6 +31784,11 @@ qualified {
   qualified_type_id: 0xa687d0b4
 }
 qualified {
+  id: 0xf5b28b19
+  qualifier: CONST
+  qualified_type_id: 0xa68d9aed
+}
+qualified {
   id: 0xf5d07691
   qualifier: CONST
   qualified_type_id: 0xa7066cce
@@ -32072,6 +32112,11 @@ qualified {
   id: 0xfb4fcd23
   qualifier: CONST
   qualified_type_id: 0x9d788207
+}
+qualified {
+  id: 0xfb5caac9
+  qualifier: CONST
+  qualified_type_id: 0x9d351dae
 }
 qualified {
   id: 0xfb6adb3d
@@ -38975,6 +39020,12 @@ member {
   name: "__subtree_last"
   type_id: 0x92233392
   offset: 1088
+}
+member {
+  id: 0x01ca355d
+  name: "__subtree_last"
+  type_id: 0x33756485
+  offset: 320
 }
 member {
   id: 0x5c60dedf
@@ -65622,6 +65673,12 @@ member {
   offset: 1152
 }
 member {
+  id: 0x277a7477
+  name: "default_flags"
+  type_id: 0x33756485
+  offset: 320
+}
+member {
   id: 0x41f69a04
   name: "default_frame_rate"
   type_id: 0xc9082b19
@@ -65860,6 +65917,12 @@ member {
   name: "deferred_irq_work"
   type_id: 0xb95bf932
   offset: 1664
+}
+member {
+  id: 0xf1ade02e
+  name: "deferred_item"
+  type_id: 0x49a73111
+  offset: 512
 }
 member {
   id: 0xa9cf9891
@@ -68182,6 +68245,12 @@ member {
   name: "dev_private"
   type_id: 0x18bd6530
   offset: 512
+}
+member {
+  id: 0xc89d8b2c
+  name: "dev_private_owner"
+  type_id: 0x18bd6530
+  offset: 448
 }
 member {
   id: 0x65ad1fd8
@@ -76687,6 +76756,12 @@ member {
   name: "event"
   type_id: 0x87fc16b0
   offset: 128
+}
+member {
+  id: 0x0ad767d6
+  name: "event"
+  type_id: 0x98849204
+  offset: 224
 }
 member {
   id: 0x0add8422
@@ -91981,6 +92056,12 @@ member {
   offset: 64
 }
 member {
+  id: 0x055486a8
+  name: "hmm_pfns"
+  type_id: 0x064d6086
+  offset: 256
+}
+member {
   id: 0x37a2e18e
   name: "hnnode"
   type_id: 0xdb2fb9a5
@@ -99168,6 +99249,11 @@ member {
   offset: 1536
 }
 member {
+  id: 0x497f1ff5
+  name: "interval_tree"
+  type_id: 0x98a855cd
+}
+member {
   id: 0x02e2818d
   name: "interval_us"
   type_id: 0xfc0e1dbd
@@ -99308,6 +99394,11 @@ member {
   offset: 192
 }
 member {
+  id: 0xf24f09cc
+  name: "invalidate"
+  type_id: 0x343261d5
+}
+member {
   id: 0xfe5a1285
   name: "invalidate_folio"
   type_id: 0x0c5a56fb
@@ -99329,6 +99420,12 @@ member {
   id: 0xbbcae42f
   name: "invalidate_rkey"
   type_id: 0xc9082b19
+}
+member {
+  id: 0xa4356acd
+  name: "invalidate_seq"
+  type_id: 0x33756485
+  offset: 640
 }
 member {
   id: 0x720365d0
@@ -104265,6 +104362,12 @@ member {
   name: "last"
   type_id: 0x3bde0140
   offset: 64
+}
+member {
+  id: 0x265c78ce
+  name: "last"
+  type_id: 0x33756485
+  offset: 256
 }
 member {
   id: 0x266223ba
@@ -116909,6 +117012,12 @@ member {
   offset: 64
 }
 member {
+  id: 0x3025d29c
+  name: "mm"
+  type_id: 0x1b36c7a2
+  offset: 448
+}
+member {
   id: 0x3025d5eb
   name: "mm"
   type_id: 0x1b36c7a2
@@ -124843,6 +124952,11 @@ member {
   offset: 128
 }
 member {
+  id: 0x37e04bdc
+  name: "notifier"
+  type_id: 0x13f857e5
+}
+member {
   id: 0xba5da6b0
   name: "notifier_call"
   type_id: 0x0aeefe2d
@@ -124883,6 +124997,12 @@ member {
   type_id: 0x295c7202
   offset: 1
   bitsize: 1
+}
+member {
+  id: 0x58c7fe7a
+  name: "notifier_seq"
+  type_id: 0x33756485
+  offset: 64
 }
 member {
   id: 0x4824fef8
@@ -130289,6 +130409,12 @@ member {
   offset: 384
 }
 member {
+  id: 0xafbf4622
+  name: "ops"
+  type_id: 0x34471315
+  offset: 384
+}
+member {
   id: 0xafbf4c24
   name: "ops"
   type_id: 0x344c87c1
@@ -131387,6 +131513,12 @@ member {
   name: "owner"
   type_id: 0x18bd6530
   offset: 1152
+}
+member {
+  id: 0x4a85c842
+  name: "owner"
+  type_id: 0x18bd6530
+  offset: 256
 }
 member {
   id: 0x4a85cf2e
@@ -135187,6 +135319,12 @@ member {
   name: "pfn"
   type_id: 0x33756485
   offset: 64
+}
+member {
+  id: 0x76a43e0a
+  name: "pfn_flags_mask"
+  type_id: 0x33756485
+  offset: 384
 }
 member {
   id: 0xe32968ec
@@ -167157,6 +167295,12 @@ member {
   id: 0x46284634
   name: "start"
   type_id: 0x33756485
+}
+member {
+  id: 0x46284efd
+  name: "start"
+  type_id: 0x33756485
+  offset: 192
 }
 member {
   id: 0x46284ff6
@@ -215872,6 +216016,22 @@ struct_union {
   }
 }
 struct_union {
+  id: 0x266de2fd
+  kind: STRUCT
+  name: "hmm_range"
+  definition {
+    bytesize: 64
+    member_id: 0x37e04bdc
+    member_id: 0x58c7fe7a
+    member_id: 0x46284ff6
+    member_id: 0x823c26d1
+    member_id: 0x055486a8
+    member_id: 0x277a7477
+    member_id: 0x76a43e0a
+    member_id: 0xc89d8b2c
+  }
+}
+struct_union {
   id: 0x76513fcc
   kind: STRUCT
   name: "hotplug_slot"
@@ -219197,6 +219357,18 @@ struct_union {
   definition {
     bytesize: 4
     member_id: 0x1a8b8780
+  }
+}
+struct_union {
+  id: 0x98a855cd
+  kind: STRUCT
+  name: "interval_tree_node"
+  definition {
+    bytesize: 48
+    member_id: 0xfb47df92
+    member_id: 0x46284efd
+    member_id: 0x265c78ce
+    member_id: 0x01ca355d
   }
 }
 struct_union {
@@ -224747,6 +224919,42 @@ struct_union {
     member_id: 0x5a65b1aa
     member_id: 0x5ab42029
     member_id: 0xcd004056
+  }
+}
+struct_union {
+  id: 0x65a1b90a
+  kind: STRUCT
+  name: "mmu_interval_notifier"
+  definition {
+    bytesize: 88
+    member_id: 0x497f1ff5
+    member_id: 0xafbf4622
+    member_id: 0x3025d29c
+    member_id: 0xf1ade02e
+    member_id: 0xa4356acd
+  }
+}
+struct_union {
+  id: 0x9d351dae
+  kind: STRUCT
+  name: "mmu_interval_notifier_ops"
+  definition {
+    bytesize: 8
+    member_id: 0xf24f09cc
+  }
+}
+struct_union {
+  id: 0xa68d9aed
+  kind: STRUCT
+  name: "mmu_notifier_range"
+  definition {
+    bytesize: 40
+    member_id: 0x3025d5eb
+    member_id: 0x462842d5
+    member_id: 0x823c27da
+    member_id: 0x2d2d09f1
+    member_id: 0x0ad767d6
+    member_id: 0x4a85c842
   }
 }
 struct_union {
@@ -260366,6 +260574,44 @@ enumeration {
   }
 }
 enumeration {
+  id: 0x98849204
+  name: "mmu_notifier_event"
+  definition {
+    underlying_type_id: 0x4585663f
+    enumerator {
+      name: "MMU_NOTIFY_UNMAP"
+    }
+    enumerator {
+      name: "MMU_NOTIFY_CLEAR"
+      value: 1
+    }
+    enumerator {
+      name: "MMU_NOTIFY_PROTECTION_VMA"
+      value: 2
+    }
+    enumerator {
+      name: "MMU_NOTIFY_PROTECTION_PAGE"
+      value: 3
+    }
+    enumerator {
+      name: "MMU_NOTIFY_SOFT_DIRTY"
+      value: 4
+    }
+    enumerator {
+      name: "MMU_NOTIFY_RELEASE"
+      value: 5
+    }
+    enumerator {
+      name: "MMU_NOTIFY_MIGRATE"
+      value: 6
+    }
+    enumerator {
+      name: "MMU_NOTIFY_EXCLUSIVE"
+      value: 7
+    }
+  }
+}
+enumeration {
   id: 0x73b81062
   name: "mode_set_atomic"
   definition {
@@ -269773,6 +270019,11 @@ function {
   parameter_id: 0x6720d32f
 }
 function {
+  id: 0x1466446a
+  return_type_id: 0x48b5725f
+  parameter_id: 0x13f857e5
+}
+function {
   id: 0x146afcfb
   return_type_id: 0x0017d728
   parameter_id: 0x2b8f13b3
@@ -272805,6 +273056,12 @@ function {
   return_type_id: 0x48b5725f
   parameter_id: 0x2efd5036
   parameter_id: 0x18bd6530
+}
+function {
+  id: 0x1b4c69f5
+  return_type_id: 0x48b5725f
+  parameter_id: 0x2cba2cd4
+  parameter_id: 0x3eacd4c8
 }
 function {
   id: 0x1b4d4832
@@ -276309,6 +276566,11 @@ function {
   parameter_id: 0x3654c061
 }
 function {
+  id: 0x3552d8aa
+  return_type_id: 0x33756485
+  parameter_id: 0x13f857e5
+}
+function {
   id: 0x35757b7f
   return_type_id: 0xe62ebf07
   parameter_id: 0x391f15ea
@@ -278694,6 +278956,13 @@ function {
   parameter_id: 0x92233392
   parameter_id: 0x92233392
   parameter_id: 0x92233392
+}
+function {
+  id: 0x718cfe87
+  return_type_id: 0x2cba2cd4
+  parameter_id: 0x3eacd4c8
+  parameter_id: 0x33756485
+  parameter_id: 0x33756485
 }
 function {
   id: 0x71fd00eb
@@ -283896,6 +284165,13 @@ function {
   parameter_id: 0x6720d32f
 }
 function {
+  id: 0x93e7a8a1
+  return_type_id: 0x0a134144
+  parameter_id: 0x1b36c7a2
+  parameter_id: 0x33756485
+  parameter_id: 0x33756485
+}
+function {
   id: 0x93e8301d
   return_type_id: 0x6720d32f
   parameter_id: 0x3df0a7d3
@@ -287283,6 +287559,15 @@ function {
   return_type_id: 0x6720d32f
   parameter_id: 0x11e6864c
   parameter_id: 0x3855f122
+}
+function {
+  id: 0x991e3055
+  return_type_id: 0x6720d32f
+  parameter_id: 0x13f857e5
+  parameter_id: 0x1b36c7a2
+  parameter_id: 0x33756485
+  parameter_id: 0x33756485
+  parameter_id: 0x34471315
 }
 function {
   id: 0x99214080
@@ -291983,6 +292268,11 @@ function {
   id: 0x9d42059c
   return_type_id: 0x6720d32f
   parameter_id: 0x030b9acf
+}
+function {
+  id: 0x9d423369
+  return_type_id: 0x6720d32f
+  parameter_id: 0x030b4118
 }
 function {
   id: 0x9d45b6a2
@@ -298416,6 +298706,13 @@ function {
   parameter_id: 0x1330389b
   parameter_id: 0x1618455d
   parameter_id: 0x6720d32f
+}
+function {
+  id: 0xfa8961c9
+  return_type_id: 0x6d7f5ff6
+  parameter_id: 0x13f857e5
+  parameter_id: 0x37fc9b61
+  parameter_id: 0x33756485
 }
 function {
   id: 0xfaa52ed3
@@ -311979,6 +312276,15 @@ elf_symbol {
   full_name: "find_iova"
 }
 elf_symbol {
+  id: 0xd2a94cce
+  name: "find_vma_intersection"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x7dfe4a72
+  type_id: 0x93e7a8a1
+  full_name: "find_vma_intersection"
+}
+elf_symbol {
   id: 0x557a4fc7
   name: "finish_open"
   is_defined: true
@@ -313968,6 +314274,15 @@ elf_symbol {
   full_name: "hid_unregister_driver"
 }
 elf_symbol {
+  id: 0x4c0fc3cf
+  name: "hmm_range_fault"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xf7155ba9
+  type_id: 0x9d423369
+  full_name: "hmm_range_fault"
+}
+elf_symbol {
   id: 0x86e16775
   name: "hrtimer_active"
   is_defined: true
@@ -315356,6 +315671,33 @@ elf_symbol {
   namespace: "INTEL_TCC"
   type_id: 0x85d454a8
   full_name: "intel_tcc_set_offset"
+}
+elf_symbol {
+  id: 0x92b91a66
+  name: "interval_tree_insert"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x372d8ccb
+  type_id: 0x1b4c69f5
+  full_name: "interval_tree_insert"
+}
+elf_symbol {
+  id: 0x0d19106d
+  name: "interval_tree_iter_first"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xdd437943
+  type_id: 0x718cfe87
+  full_name: "interval_tree_iter_first"
+}
+elf_symbol {
+  id: 0xe7fc8dce
+  name: "interval_tree_remove"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x372d8ccb
+  type_id: 0x1b4c69f5
+  full_name: "interval_tree_remove"
 }
 elf_symbol {
   id: 0x09639ee8
@@ -318356,6 +318698,33 @@ elf_symbol {
   crc: 0x8278301f
   type_id: 0x1655e07b
   full_name: "mmput"
+}
+elf_symbol {
+  id: 0x58f7cd70
+  name: "mmu_interval_notifier_insert"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x1fb354c6
+  type_id: 0x991e3055
+  full_name: "mmu_interval_notifier_insert"
+}
+elf_symbol {
+  id: 0xb68663e8
+  name: "mmu_interval_notifier_remove"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xbe61a746
+  type_id: 0x1466446a
+  full_name: "mmu_interval_notifier_remove"
+}
+elf_symbol {
+  id: 0x325416a5
+  name: "mmu_interval_read_begin"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x4850daca
+  type_id: 0x3552d8aa
+  full_name: "mmu_interval_read_begin"
 }
 elf_symbol {
   id: 0xdf7b9a78
@@ -335354,6 +335723,7 @@ interface {
   symbol_id: 0x8dfd963b
   symbol_id: 0xc7c68a05
   symbol_id: 0xbe7a7add
+  symbol_id: 0xd2a94cce
   symbol_id: 0x557a4fc7
   symbol_id: 0xf882020f
   symbol_id: 0x2e62a121
@@ -335575,6 +335945,7 @@ interface {
   symbol_id: 0x6ca4d0ed
   symbol_id: 0x741d5af7
   symbol_id: 0x6e37f09d
+  symbol_id: 0x4c0fc3cf
   symbol_id: 0x86e16775
   symbol_id: 0x66b7fd66
   symbol_id: 0xedb14db4
@@ -335729,6 +336100,9 @@ interface {
   symbol_id: 0x32952b3e
   symbol_id: 0xd5bb1ef7
   symbol_id: 0x485432fb
+  symbol_id: 0x92b91a66
+  symbol_id: 0x0d19106d
+  symbol_id: 0xe7fc8dce
   symbol_id: 0x09639ee8
   symbol_id: 0x22167fe7
   symbol_id: 0xae43d3d4
@@ -336063,6 +336437,9 @@ interface {
   symbol_id: 0x381bc1b0
   symbol_id: 0xf80e708c
   symbol_id: 0x236a1277
+  symbol_id: 0x58f7cd70
+  symbol_id: 0xb68663e8
+  symbol_id: 0x325416a5
   symbol_id: 0xdf7b9a78
   symbol_id: 0x93f5b442
   symbol_id: 0x7eaf76f6

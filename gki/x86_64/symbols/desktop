@@ -1125,6 +1125,7 @@
   _find_next_bit
   _find_next_or_bit
   _find_next_zero_bit
+  find_vma_intersection
   finish_open
   finish_wait
   firmware_kobj
@@ -1358,6 +1359,7 @@
   __hid_register_driver
   hid_report_raw_event
   hid_unregister_driver
+  hmm_range_fault
   hrtimer_active
   hrtimer_cancel
   hrtimer_cb_get_time
@@ -1524,6 +1526,9 @@
   intel_tcc_get_temp
   intel_tcc_get_tjmax
   intel_tcc_set_offset
+  interval_tree_insert
+  interval_tree_iter_first
+  interval_tree_remove
   intlog10
   int_pow
   int_sqrt
@@ -1867,6 +1872,9 @@
   mmc_wait_for_req_done
   __mmdrop
   mmput
+  mmu_interval_notifier_insert
+  mmu_interval_notifier_remove
+  mmu_interval_read_begin
   mod_delayed_work_on
   mod_timer
   __module_get
