@@ -237,6 +237,9 @@ union pkvm_hc_data {
 	struct {
 		struct alloc_domain_data data;
 	} iommu_alloc_domain;
+	struct {
+		struct pkvm_memcache memcache;
+	} iommu_free_domain;
 #endif
 	struct {
 		bool has_intr;
