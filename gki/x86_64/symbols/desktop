@@ -786,6 +786,9 @@
   drm_av_sync_delay
   drm_calc_timestamping_constants
   drm_clflush_virt_range
+  drm_client_dev_resume
+  drm_client_dev_suspend
+  drm_client_dev_unregister
   drm_color_lut_check
   drm_colorop_set_next_property
   drm_compat_ioctl
@@ -3096,6 +3099,8 @@
   touch_atime
   touchscreen_parse_properties
   touchscreen_report_pos
+  _trace_android_vh_pcpu_rwsem_lock_acquired
+  _trace_android_vh_pcpu_rwsem_lock_released
   trace_event_buffer_commit
   trace_event_buffer_reserve
   trace_event_printf
