@@ -29,16 +29,8 @@
 #include <linux/numa.h>
 #include <linux/limits.h>
 #include <asm/irq_remapping.h>
-#include <asm/kvm_host.h>
-
-#ifdef __PKVM_HYP__
-#include <asm/pkvm_spinlock.h>
-#include "memory.h"
-#include "debug.h"
-#endif
 
 #include "iommu.h"
-#ifndef __PKVM_HYP__
 #include "../irq_remapping.h"
 #include "../iommu-pages.h"
 #include "perf.h"
@@ -907,8 +899,8 @@ dmar_validate_one_drhd(struct acpi_dmar_header *entry, void *arg)
 		return -EINVAL;
 	}
 
-	cap = readq(addr + DMAR_CAP_REG);
-	ecap = readq(addr + DMAR_ECAP_REG);
+	cap = dmar_readq(addr + DMAR_CAP_REG);
+	ecap = dmar_readq(addr + DMAR_ECAP_REG);
 
 	if (arg)
 		iounmap(addr);
@@ -921,28 +913,6 @@ dmar_validate_one_drhd(struct acpi_dmar_header *entry, void *arg)
 	}
 
 	return 0;
-}
-
-static int __init intel_iommu_init_nop(void) { return 0; }
-
-static inline void setup_iommu_init_hooks(void)
-{
-	if (enable_pkvm) {
-		/*
-		 * iommu_init happens during pkvm initialization
-		 * and hence a nop here.
-		 */
-		x86_init.iommu.iommu_init = intel_iommu_init_nop;
-	} else {
-		x86_init.iommu.iommu_init = intel_iommu_init;
-	}
-	/*
-	 * Set iommu_shutdown hook regardless of pkvm.
-	 * pkvm won't get a chance to shutdown iommu cleanly
-	 * on reboot as we don't reprivilege at reboot. So,
-	 * let the host do it in its normal shutdown flow.
-	 */
-	x86_platform.iommu_shutdown = intel_iommu_shutdown;
 }
 
 void __init detect_intel_iommu(void)
@@ -965,8 +935,10 @@ void __init detect_intel_iommu(void)
 		pci_request_acs();
 	}
 
-	if (!ret)
-		setup_iommu_init_hooks();
+	if (!ret) {
+		x86_init.iommu.iommu_init = intel_iommu_init;
+		x86_platform.iommu_shutdown = intel_iommu_shutdown;
+	}
 
 	if (dmar_tbl) {
 		acpi_put_table(dmar_tbl);
@@ -1010,8 +982,8 @@ static int map_iommu(struct intel_iommu *iommu, struct dmar_drhd_unit *drhd)
 		goto release;
 	}
 
-	iommu->cap = dmar_readq(iommu, DMAR_CAP_REG);
-	iommu->ecap = dmar_readq(iommu, DMAR_ECAP_REG);
+	iommu->cap = dmar_readq(iommu->reg + DMAR_CAP_REG);
+	iommu->ecap = dmar_readq(iommu->reg + DMAR_ECAP_REG);
 
 	if (iommu->cap == (uint64_t)-1 && iommu->ecap == (uint64_t)-1) {
 		err = -EINVAL;
@@ -1045,7 +1017,7 @@ static int map_iommu(struct intel_iommu *iommu, struct dmar_drhd_unit *drhd)
 		int i;
 
 		for (i = 0; i < DMA_MAX_NUM_ECMDCAP; i++) {
-			iommu->ecmdcap[i] = dmar_readq(iommu, DMAR_ECCAP_REG +
+			iommu->ecmdcap[i] = dmar_readq(iommu->reg + DMAR_ECCAP_REG +
 						       i * DMA_ECMD_REG_STEP);
 		}
 	}
@@ -1128,7 +1100,7 @@ static int alloc_iommu(struct dmar_drhd_unit *drhd)
 	ida_init(&iommu->domain_ida);
 	mutex_init(&iommu->did_lock);
 
-	ver = dmar_readl(iommu, DMAR_VER_REG);
+	ver = readl(iommu->reg + DMAR_VER_REG);
 	pr_info("%s: reg_base_addr %llx ver %d:%d cap %llx ecap %llx\n",
 		iommu->name,
 		(unsigned long long)drhd->reg_base_addr,
@@ -1137,7 +1109,7 @@ static int alloc_iommu(struct dmar_drhd_unit *drhd)
 		(unsigned long long)iommu->ecap);
 
 	/* Reflect status in gcmd */
-	sts = dmar_readl(iommu, DMAR_GSTS_REG);
+	sts = readl(iommu->reg + DMAR_GSTS_REG);
 	if (sts & DMA_GSTS_IRES)
 		iommu->gcmd |= DMA_GCMD_IRE;
 	if (sts & DMA_GSTS_TES)
@@ -1216,6 +1188,7 @@ static void free_iommu(struct intel_iommu *iommu)
 
 	if (iommu->qi) {
 		iommu_free_pages(iommu->qi->desc);
+		kfree(iommu->qi->desc_status);
 		kfree(iommu->qi);
 	}
 
@@ -1226,7 +1199,6 @@ static void free_iommu(struct intel_iommu *iommu)
 	ida_free(&dmar_seq_ids, iommu->seq_id);
 	kfree(iommu);
 }
-#endif /* !__PKVM_HYP__ */
 
 /*
  * Reclaim all the submitted descriptors which have completed its work.
@@ -1267,8 +1239,8 @@ static const char *qi_type_string(u8 type)
 
 static void qi_dump_fault(struct intel_iommu *iommu, u32 fault)
 {
-	unsigned int head = dmar_readl(iommu, DMAR_IQH_REG);
-	u64 iqe_err = dmar_readq(iommu, DMAR_IQER_REG);
+	unsigned int head = dmar_readl(iommu->reg + DMAR_IQH_REG);
+	u64 iqe_err = dmar_readq(iommu->reg + DMAR_IQER_REG);
 	struct qi_desc *desc = iommu->qi->desc + head;
 
 	if (fault & DMA_FSTS_IQE)
@@ -1300,9 +1272,7 @@ static int qi_check_fault(struct intel_iommu *iommu, int index, int wait_index)
 {
 	u32 fault;
 	int head, tail;
-#ifndef __PKVM_HYP__
 	struct device *dev;
-#endif
 	u64 iqe_err, ite_sid;
 	struct q_inval *qi = iommu->qi;
 	int shift = qi_shift(iommu);
@@ -1310,7 +1280,7 @@ static int qi_check_fault(struct intel_iommu *iommu, int index, int wait_index)
 	if (qi->desc_status[wait_index] == QI_ABORT)
 		return -EAGAIN;
 
-	fault = dmar_readl(iommu, DMAR_FSTS_REG);
+	fault = readl(iommu->reg + DMAR_FSTS_REG);
 	if (fault & (DMA_FSTS_IQE | DMA_FSTS_ITE | DMA_FSTS_ICE))
 		qi_dump_fault(iommu, fault);
 
@@ -1320,7 +1290,7 @@ static int qi_check_fault(struct intel_iommu *iommu, int index, int wait_index)
 	 * is cleared.
 	 */
 	if (fault & DMA_FSTS_IQE) {
-		head = dmar_readl(iommu, DMAR_IQH_REG);
+		head = readl(iommu->reg + DMAR_IQH_REG);
 		if ((head >> shift) == index) {
 			struct qi_desc *desc = qi->desc + head;
 
@@ -1331,7 +1301,7 @@ static int qi_check_fault(struct intel_iommu *iommu, int index, int wait_index)
 			 */
 			memcpy(desc, qi->desc + (wait_index << shift),
 			       1 << shift);
-			dmar_writel(iommu, DMAR_FSTS_REG, DMA_FSTS_IQE);
+			writel(DMA_FSTS_IQE, iommu->reg + DMAR_FSTS_REG);
 			pr_info("Invalidation Queue Error (IQE) cleared\n");
 			return -EINVAL;
 		}
@@ -1342,20 +1312,20 @@ static int qi_check_fault(struct intel_iommu *iommu, int index, int wait_index)
 	 * No new descriptors are fetched until the ITE is cleared.
 	 */
 	if (fault & DMA_FSTS_ITE) {
-		head = dmar_readl(iommu, DMAR_IQH_REG);
+		head = readl(iommu->reg + DMAR_IQH_REG);
 		head = ((head >> shift) - 1 + QI_LENGTH) % QI_LENGTH;
 		head |= 1;
-		tail = dmar_readl(iommu, DMAR_IQT_REG);
+		tail = readl(iommu->reg + DMAR_IQT_REG);
 		tail = ((tail >> shift) - 1 + QI_LENGTH) % QI_LENGTH;
 
 		/*
 		 * SID field is valid only when the ITE field is Set in FSTS_REG
 		 * see Intel VT-d spec r4.1, section 11.4.9.9
 		 */
-		iqe_err = dmar_readq(iommu, DMAR_IQER_REG);
+		iqe_err = dmar_readq(iommu->reg + DMAR_IQER_REG);
 		ite_sid = DMAR_IQER_REG_ITESID(iqe_err);
 
-		dmar_writel(iommu, DMAR_FSTS_REG, DMA_FSTS_ITE);
+		writel(DMA_FSTS_ITE, iommu->reg + DMAR_FSTS_REG);
 		pr_info("Invalidation Time-out Error (ITE) cleared\n");
 
 		do {
@@ -1364,7 +1334,6 @@ static int qi_check_fault(struct intel_iommu *iommu, int index, int wait_index)
 			head = (head - 2 + QI_LENGTH) % QI_LENGTH;
 		} while (head != tail);
 
-#ifndef __PKVM_HYP__
 		/*
 		 * If device was released or isn't present, no need to retry
 		 * the ATS invalidate request anymore.
@@ -1378,34 +1347,17 @@ static int qi_check_fault(struct intel_iommu *iommu, int index, int wait_index)
 			    !pci_device_is_present(to_pci_dev(dev)))
 				return -ETIMEDOUT;
 		}
-#endif
 		if (qi->desc_status[wait_index] == QI_ABORT)
 			return -EAGAIN;
 	}
 
 	if (fault & DMA_FSTS_ICE) {
-		dmar_writel(iommu, DMAR_FSTS_REG, DMA_FSTS_ICE);
+		writel(DMA_FSTS_ICE, iommu->reg + DMAR_FSTS_REG);
 		pr_info("Invalidation Completion Error (ICE) cleared\n");
 	}
 
 	return 0;
 }
-
-#ifndef __PKVM_HYP__
-#define qi_lock(qi) raw_spin_lock(&(qi)->q_lock)
-#define qi_unlock(qi) raw_spin_unlock(&(qi)->q_lock)
-#define qi_lock_irqsave(qi, flags) raw_spin_lock_irqsave(&(qi)->q_lock, flags)
-#define qi_unlock_irqrestore(qi, flags) raw_spin_unlock_irqrestore(&(qi)->q_lock, flags)
-#else
-#define qi_lock(qi) pkvm_spin_lock(&(qi)->q_lock)
-#define qi_unlock(qi) pkvm_spin_unlock(&(qi)->q_lock)
-#define qi_lock_irqsave(qi, flags) qi_lock(qi)
-#define qi_unlock_irqrestore(qi, flags) qi_unlock(qi)
-
-#define trace_qi_submit(a1, a2, a3, a4, a5)
-#undef virt_to_phys
-#define virt_to_phys(ptr) __pkvm_pa(ptr)
-#endif
 
 /*
  * Function to submit invalidation descriptors of all types to the queued
@@ -1418,26 +1370,19 @@ int qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
 		   unsigned int count, unsigned long options)
 {
 	struct q_inval *qi = iommu->qi;
-#ifndef __PKVM_HYP__
 	s64 devtlb_start_ktime = 0;
 	s64 iotlb_start_ktime = 0;
 	s64 iec_start_ktime = 0;
-#endif
 	struct qi_desc wait_desc;
 	int wait_index, index;
-#ifndef __PKVM_HYP__
 	unsigned long flags;
-#endif
 	int offset, shift;
 	int rc, i;
-#ifndef __PKVM_HYP__
 	u64 type;
-#endif
 
 	if (!qi)
 		return 0;
 
-#ifndef __PKVM_HYP__
 	type = desc->qw0 & GENMASK_ULL(3, 0);
 
 	if ((type == QI_IOTLB_TYPE || type == QI_EIOTLB_TYPE) &&
@@ -1451,21 +1396,20 @@ int qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
 	if (type == QI_IEC_TYPE &&
 	    dmar_latency_enabled(iommu, DMAR_LATENCY_INV_IEC))
 		iec_start_ktime = ktime_to_ns(ktime_get());
-#endif /* !__PKVM_HYP__ */
 
 restart:
 	rc = 0;
 
-	qi_lock_irqsave(qi, flags);
+	raw_spin_lock_irqsave(&qi->q_lock, flags);
 	/*
 	 * Check if we have enough empty slots in the queue to submit,
 	 * the calculation is based on:
 	 * # of desc + 1 wait desc + 1 space between head and tail
 	 */
 	while (qi->free_cnt < count + 2) {
-		qi_unlock_irqrestore(qi, flags);
+		raw_spin_unlock_irqrestore(&qi->q_lock, flags);
 		cpu_relax();
-		qi_lock_irqsave(qi, flags);
+		raw_spin_lock_irqsave(&qi->q_lock, flags);
 	}
 
 	index = qi->free_head;
@@ -1499,7 +1443,7 @@ restart:
 	 * update the HW tail register indicating the presence of
 	 * new descriptors.
 	 */
-	dmar_writel(iommu, DMAR_IQT_REG, qi->free_head << shift);
+	writel(qi->free_head << shift, iommu->reg + DMAR_IQT_REG);
 
 	while (READ_ONCE(qi->desc_status[wait_index]) != QI_DONE) {
 		/*
@@ -1513,9 +1457,9 @@ restart:
 		if (rc)
 			break;
 
-		qi_unlock(qi);
+		raw_spin_unlock(&qi->q_lock);
 		cpu_relax();
-		qi_lock(qi);
+		raw_spin_lock(&qi->q_lock);
 	}
 
 	/*
@@ -1530,12 +1474,11 @@ restart:
 		qi->desc_status[(index + i) % QI_LENGTH] = QI_FREE;
 
 	reclaim_free_desc(qi);
-	qi_unlock_irqrestore(qi, flags);
+	raw_spin_unlock_irqrestore(&qi->q_lock, flags);
 
 	if (rc == -EAGAIN)
 		goto restart;
 
-#ifndef __PKVM_HYP__
 	if (iotlb_start_ktime)
 		dmar_latency_update(iommu, DMAR_LATENCY_INV_IOTLB,
 				ktime_to_ns(ktime_get()) - iotlb_start_ktime);
@@ -1547,7 +1490,6 @@ restart:
 	if (iec_start_ktime)
 		dmar_latency_update(iommu, DMAR_LATENCY_INV_IEC,
 				ktime_to_ns(ktime_get()) - iec_start_ktime);
-#endif
 
 	return rc;
 }
@@ -1559,17 +1501,6 @@ void qi_global_iec(struct intel_iommu *iommu)
 {
 	struct qi_desc desc;
 
-#ifndef __PKVM_HYP__
-	if (pkvm_enabled()) {
-		int ret = pv_iec_flush(iommu, true, 0, 0);
-
-		if (ret)
-			pr_warn("iommu%d: pv_iec_flush failed!\n",
-				iommu->seq_id);
-		return;
-	}
-#endif
-
 	desc.qw0 = QI_IEC_TYPE;
 	desc.qw1 = 0;
 	desc.qw2 = 0;
@@ -1577,24 +1508,6 @@ void qi_global_iec(struct intel_iommu *iommu)
 
 	/* should never fail */
 	qi_submit_sync(iommu, &desc, 1, 0);
-}
-
-int qi_flush_iec(struct intel_iommu *iommu, int index, int mask)
-{
-	struct qi_desc desc;
-
-#ifndef __PKVM_HYP__
-	if (pkvm_enabled())
-		return pv_iec_flush(iommu, false, index, mask);
-#endif
-
-	desc.qw0 = QI_IEC_IIDEX(index) | QI_IEC_TYPE | QI_IEC_IM(mask)
-		   | QI_IEC_SELECTIVE;
-	desc.qw1 = 0;
-	desc.qw2 = 0;
-	desc.qw3 = 0;
-
-	return qi_submit_sync(iommu, &desc, 1, 0);
 }
 
 void qi_flush_context(struct intel_iommu *iommu, u16 did, u16 sid, u8 fm,
@@ -1631,13 +1544,8 @@ void qi_flush_dev_iotlb(struct intel_iommu *iommu, u16 sid, u16 pfsid,
 	 * Software is recommended to not submit any Device-TLB invalidation
 	 * requests while address remapping hardware is disabled.
 	 */
-#ifndef __PKVM_HYP__
 	if (!(iommu->gcmd & DMA_GCMD_TE))
 		return;
-#else
-	if (!(iommu->vgsts & DMA_GSTS_TES))
-		return;
-#endif
 
 	qi_desc_dev_iotlb(sid, pfsid, qdep, addr, mask, &desc);
 	qi_submit_sync(iommu, &desc, 1, 0);
@@ -1675,13 +1583,8 @@ void qi_flush_dev_iotlb_pasid(struct intel_iommu *iommu, u16 sid, u16 pfsid,
 	 * Software is recommended to not submit any Device-TLB invalidation
 	 * requests while address remapping hardware is disabled.
 	 */
-#ifndef __PKVM_HYP__
 	if (!(iommu->gcmd & DMA_GCMD_TE))
 		return;
-#else
-	if (!(iommu->vgsts & DMA_GSTS_TES))
-		return;
-#endif
 
 	qi_desc_dev_iotlb_pasid(sid, pfsid, pasid,
 				qdep, addr, size_order,
@@ -1699,7 +1602,6 @@ void qi_flush_pasid_cache(struct intel_iommu *iommu, u16 did,
 	qi_submit_sync(iommu, &desc, 1, 0);
 }
 
-#ifndef __PKVM_HYP__
 /*
  * Disable Queued Invalidation interface.
  */
@@ -1714,22 +1616,22 @@ void dmar_disable_qi(struct intel_iommu *iommu)
 
 	raw_spin_lock_irqsave(&iommu->register_lock, flags);
 
-	sts =  dmar_readl(iommu, DMAR_GSTS_REG);
+	sts =  readl(iommu->reg + DMAR_GSTS_REG);
 	if (!(sts & DMA_GSTS_QIES))
 		goto end;
 
 	/*
 	 * Give a chance to HW to complete the pending invalidation requests.
 	 */
-	while ((dmar_readl(iommu, DMAR_IQT_REG) !=
-		dmar_readl(iommu, DMAR_IQH_REG)) &&
+	while ((readl(iommu->reg + DMAR_IQT_REG) !=
+		readl(iommu->reg + DMAR_IQH_REG)) &&
 		(DMAR_OPERATION_TIMEOUT > (get_cycles() - start_time)))
 		cpu_relax();
 
 	iommu->gcmd &= ~DMA_GCMD_QIE;
-	dmar_writel(iommu, DMAR_GCMD_REG, iommu->gcmd);
+	writel(iommu->gcmd, iommu->reg + DMAR_GCMD_REG);
 
-	IOMMU_WAIT_OP(iommu, DMAR_GSTS_REG, dmar_readl,
+	IOMMU_WAIT_OP(iommu, DMAR_GSTS_REG, readl,
 		      !(sts & DMA_GSTS_QIES), sts);
 end:
 	raw_spin_unlock_irqrestore(&iommu->register_lock, flags);
@@ -1758,15 +1660,15 @@ static void __dmar_enable_qi(struct intel_iommu *iommu)
 	raw_spin_lock_irqsave(&iommu->register_lock, flags);
 
 	/* write zero to the tail reg */
-	dmar_writel(iommu, DMAR_IQT_REG, 0);
+	writel(0, iommu->reg + DMAR_IQT_REG);
 
-	dmar_writeq(iommu, DMAR_IQA_REG, val);
+	dmar_writeq(iommu->reg + DMAR_IQA_REG, val);
 
 	iommu->gcmd |= DMA_GCMD_QIE;
-	dmar_writel(iommu, DMAR_GCMD_REG, iommu->gcmd);
+	writel(iommu->gcmd, iommu->reg + DMAR_GCMD_REG);
 
 	/* Make sure hardware complete it */
-	IOMMU_WAIT_OP(iommu, DMAR_GSTS_REG, dmar_readl, (sts & DMA_GSTS_QIES), sts);
+	IOMMU_WAIT_OP(iommu, DMAR_GSTS_REG, readl, (sts & DMA_GSTS_QIES), sts);
 
 	raw_spin_unlock_irqrestore(&iommu->register_lock, flags);
 }
@@ -1810,6 +1712,14 @@ int dmar_enable_qi(struct intel_iommu *iommu)
 	}
 
 	qi->desc = desc;
+
+	qi->desc_status = kcalloc(QI_LENGTH, sizeof(int), GFP_ATOMIC);
+	if (!qi->desc_status) {
+		iommu_free_pages(qi->desc);
+		kfree(qi);
+		iommu->qi = NULL;
+		return -ENOMEM;
+	}
 
 	raw_spin_lock_init(&qi->q_lock);
 
@@ -1953,9 +1863,9 @@ void dmar_msi_unmask(struct irq_data *data)
 
 	/* unmask it */
 	raw_spin_lock_irqsave(&iommu->register_lock, flag);
-	dmar_writel(iommu, reg, 0);
+	writel(0, iommu->reg + reg);
 	/* Read a reg to force flush the post write */
-	dmar_readl(iommu, reg);
+	readl(iommu->reg + reg);
 	raw_spin_unlock_irqrestore(&iommu->register_lock, flag);
 }
 
@@ -1967,9 +1877,9 @@ void dmar_msi_mask(struct irq_data *data)
 
 	/* mask it */
 	raw_spin_lock_irqsave(&iommu->register_lock, flag);
-	dmar_writel(iommu, reg, DMA_FECTL_IM);
+	writel(DMA_FECTL_IM, iommu->reg + reg);
 	/* Read a reg to force flush the post write */
-	dmar_readl(iommu, reg);
+	readl(iommu->reg + reg);
 	raw_spin_unlock_irqrestore(&iommu->register_lock, flag);
 }
 
@@ -1980,9 +1890,9 @@ void dmar_msi_write(int irq, struct msi_msg *msg)
 	unsigned long flag;
 
 	raw_spin_lock_irqsave(&iommu->register_lock, flag);
-	dmar_writel(iommu, reg + 4, msg->data);
-	dmar_writel(iommu, reg + 8, msg->address_lo);
-	dmar_writel(iommu, reg + 12, msg->address_hi);
+	writel(msg->data, iommu->reg + reg + 4);
+	writel(msg->address_lo, iommu->reg + reg + 8);
+	writel(msg->address_hi, iommu->reg + reg + 12);
 	raw_spin_unlock_irqrestore(&iommu->register_lock, flag);
 }
 
@@ -2034,7 +1944,7 @@ irqreturn_t dmar_fault(int irq, void *dev_id)
 				      DEFAULT_RATELIMIT_BURST);
 
 	raw_spin_lock_irqsave(&iommu->register_lock, flag);
-	fault_status = dmar_readl(iommu, DMAR_FSTS_REG);
+	fault_status = readl(iommu->reg + DMAR_FSTS_REG);
 	if (fault_status && __ratelimit(&rs))
 		pr_err("DRHD: handling fault status reg %x\n", fault_status);
 
@@ -2056,7 +1966,7 @@ irqreturn_t dmar_fault(int irq, void *dev_id)
 		bool pasid_present;
 
 		/* highest 32 bits */
-		data = dmar_readl(iommu, reg +
+		data = readl(iommu->reg + reg +
 				fault_index * PRIMARY_FAULT_REG_LEN + 12);
 		if (!(data & DMA_FRCD_F))
 			break;
@@ -2066,19 +1976,19 @@ irqreturn_t dmar_fault(int irq, void *dev_id)
 			type = dma_frcd_type(data);
 
 			pasid = dma_frcd_pasid_value(data);
-			data = dmar_readl(iommu, reg +
+			data = readl(iommu->reg + reg +
 				     fault_index * PRIMARY_FAULT_REG_LEN + 8);
 			source_id = dma_frcd_source_id(data);
 
 			pasid_present = dma_frcd_pasid_present(data);
-			guest_addr = dmar_readq(iommu, reg +
+			guest_addr = dmar_readq(iommu->reg + reg +
 					fault_index * PRIMARY_FAULT_REG_LEN);
 			guest_addr = dma_frcd_page_addr(guest_addr);
 		}
 
 		/* clear the fault */
-		dmar_writel(iommu, reg +
-			fault_index * PRIMARY_FAULT_REG_LEN + 12, DMA_FRCD_F);
+		writel(DMA_FRCD_F, iommu->reg + reg +
+			fault_index * PRIMARY_FAULT_REG_LEN + 12);
 
 		raw_spin_unlock_irqrestore(&iommu->register_lock, flag);
 
@@ -2094,8 +2004,8 @@ irqreturn_t dmar_fault(int irq, void *dev_id)
 		raw_spin_lock_irqsave(&iommu->register_lock, flag);
 	}
 
-	dmar_writel(iommu, DMAR_FSTS_REG,
-		DMA_FSTS_PFO | DMA_FSTS_PPF | DMA_FSTS_PRO);
+	writel(DMA_FSTS_PFO | DMA_FSTS_PPF | DMA_FSTS_PRO,
+	       iommu->reg + DMAR_FSTS_REG);
 
 unlock_exit:
 	raw_spin_unlock_irqrestore(&iommu->register_lock, flag);
@@ -2154,8 +2064,8 @@ int enable_drhd_fault_handling(unsigned int cpu)
 		 * Clear any previous faults.
 		 */
 		dmar_fault(iommu->irq, iommu);
-		fault_status = dmar_readl(iommu, DMAR_FSTS_REG);
-		dmar_writel(iommu, DMAR_FSTS_REG, fault_status);
+		fault_status = readl(iommu->reg + DMAR_FSTS_REG);
+		writel(fault_status, iommu->reg + DMAR_FSTS_REG);
 	}
 
 	return 0;
@@ -2432,11 +2342,6 @@ static int dmar_device_hotplug(acpi_handle handle, bool insert)
 	if (!dmar_in_use())
 		return 0;
 
-	if (pkvm_enabled()) {
-		pr_warn("DMAR hotplug not supported with pKVM!\n");
-		return -EOPNOTSUPP;
-	}
-
 	if (dmar_detect_dsm(handle, DMAR_DSM_FUNC_DRHD)) {
 		tmp = handle;
 	} else {
@@ -2496,4 +2401,3 @@ bool dmar_platform_optin(void)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(dmar_platform_optin);
-#endif /* !__PKVM_HYP__ */

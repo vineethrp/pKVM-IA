@@ -14,25 +14,6 @@ pteval_t __default_kernel_pte_mask;
 u64 sme_me_mask;
 #endif
 
-/*
- * Copied from arch/x86/mm/init.c: __cachemode2pte_tbl
- * Needed for PAGE_KERNEL_IO_NOCACHE which is used for
- * mapping MMIO space.
- *
- * Static values are not filled here. Host updates its
- * copy during early boot and the updated values are
- * copied during pKVM initialization.
- */
-uint16_t __cachemode2pte_tbl[_PAGE_CACHE_MODE_NUM];
-
-/* Copied from arch/x86/mm/init.c: cachemode2protval */
-unsigned long cachemode2protval(enum page_cache_mode pcm)
-{
-	if (likely(pcm == 0))
-		return 0;
-	return __cachemode2pte_tbl[pcm];
-}
-
 struct memblock_region pkvm_memory[PKVM_MEMBLOCK_REGIONS];
 unsigned int pkvm_memblock_nr;
 
@@ -80,8 +61,7 @@ bool pkvm_find_addr_range(unsigned long phys, struct range *range)
 	return false;
 }
 
-/* Copied from arch/x86/mm/pat/set_memory.c: clflush_cache_range_opt() */
-static void clflush_cache_range_opt(void *vaddr, unsigned int size)
+static void pkvm_clflush_cache_range_opt(void *vaddr, unsigned int size)
 {
 	const unsigned long clflush_size = boot_cpu_data.x86_clflush_size;
 	void *p = (void *)((unsigned long)vaddr & ~(clflush_size - 1));
@@ -94,9 +74,9 @@ static void clflush_cache_range_opt(void *vaddr, unsigned int size)
 		clflushopt(p);
 }
 
-/* Copied from arch/x86/mm/pat/set_memory.c: clflush_cache_range() */
 /**
- * clflush_cache_range - flush a cache range with clflush
+ * pkvm_clflush_cache_range - flush a cache range with clflush
+ * which is implemented refer to clflush_cache_range() in kernel.
  *
  * @vaddr:	virtual start address
  * @size:	number of bytes to flush
@@ -104,10 +84,10 @@ static void clflush_cache_range_opt(void *vaddr, unsigned int size)
  * CLFLUSHOPT is an unordered instruction which needs fencing with MFENCE or
  * SFENCE to avoid ordering issues.
  */
-void clflush_cache_range(void *vaddr, unsigned int size)
+void pkvm_clflush_cache_range(void *vaddr, unsigned int size)
 {
 	mb();
-	clflush_cache_range_opt(vaddr, size);
+	pkvm_clflush_cache_range_opt(vaddr, size);
 	mb();
 }
 

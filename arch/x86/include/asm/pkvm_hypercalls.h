@@ -11,10 +11,6 @@ BUILD_BUG_ON(1)
 #define PKVM_HC_IN PKVM_HC
 #endif
 
-#ifndef PKVM_HC_INOUT
-#define PKVM_HC_INOUT PKVM_HC
-#endif
-
 /* Hypercalls used only during pKVM initialization */
 PKVM_HC(init)
 PKVM_HC(init_finalize)
@@ -89,14 +85,6 @@ PKVM_HC(vm_mmu_map)
 PKVM_HC(vm_mmu_unmap)
 PKVM_HC(vm_mmu_age)
 
-/* IOMMU hypercalls */
-PKVM_HC_OUT(iommu_mmio_read)
-PKVM_HC(iommu_mmio_write)
-PKVM_HC_INOUT(iommu_domain_map)
-PKVM_HC(iommu_domain_unmap)
-PKVM_HC_INOUT(iommu_hypercall)
-
 #undef PKVM_HC
 #undef PKVM_HC_OUT
 #undef PKVM_HC_IN
-#undef PKVM_HC_INOUT

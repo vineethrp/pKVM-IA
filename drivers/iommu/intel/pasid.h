@@ -141,24 +141,6 @@ pasid_get_domain_id(struct pasid_entry *pe)
 }
 
 /*
- * Get the FLPTPTR (First Level Page Table Pointer) field (Bit 140 ~ 191)
- * of a scalable mode PASID entry.
- */
-static inline u64 pasid_get_flptr(struct pasid_entry *pe)
-{
-	return (u64)(READ_ONCE(pe->val[2]) & VTD_PAGE_MASK);
-}
-
-/*
- * Get the SLPTPTR (Second Level Page Table Pointer) field (Bit 12 ~ 63)
- * of a scalable mode PASID entry.
- */
-static inline u64 pasid_get_slptr(struct pasid_entry *pe)
-{
-	return (u64)(READ_ONCE(pe->val[0]) & VTD_PAGE_MASK);
-}
-
-/*
  * Setup the SLPTPTR(Second Level Page Table Pointer) field (Bit 12~63)
  * of a scalable mode PASID entry.
  */
@@ -311,11 +293,7 @@ int intel_pasid_setup_first_level(struct intel_iommu *iommu, struct device *dev,
 				  int flags);
 int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 				   struct dmar_domain *domain,
-#ifndef __PKVM_HYP__
 				   struct device *dev, u32 pasid);
-#else
-				   struct device *dev, u16 did, u32 pasid);
-#endif
 int intel_pasid_setup_dirty_tracking(struct intel_iommu *iommu,
 				     struct device *dev, u32 pasid,
 				     bool enabled);
@@ -328,11 +306,7 @@ int intel_pasid_replace_first_level(struct intel_iommu *iommu,
 				    u32 pasid, u16 did, u16 old_did, int flags);
 int intel_pasid_replace_second_level(struct intel_iommu *iommu,
 				     struct dmar_domain *domain,
-#ifndef __PKVM_HYP__
 				     struct device *dev, u16 old_did,
-#else
-				     struct device *dev, u16 did, u16 old_did,
-#endif
 				     u32 pasid);
 int intel_pasid_replace_pass_through(struct intel_iommu *iommu,
 				     struct device *dev, u16 old_did,
@@ -348,6 +322,4 @@ void intel_pasid_setup_page_snoop_control(struct intel_iommu *iommu,
 					  struct device *dev, u32 pasid);
 int intel_pasid_setup_sm_context(struct device *dev);
 void intel_pasid_teardown_sm_context(struct device *dev);
-
-int device_pasid_table_setup(struct device *dev, u8 bus, u8 devfn);
 #endif /* __INTEL_PASID_H */
