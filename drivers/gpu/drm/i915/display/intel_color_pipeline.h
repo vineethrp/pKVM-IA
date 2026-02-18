@@ -7,8 +7,7 @@
 #define __INTEL_COLOR_PIPELINE_H__
 
 struct drm_plane;
-enum pipe;
 
-int intel_color_pipeline_plane_init(struct drm_plane *plane, enum pipe pipe);
+int intel_color_pipeline_plane_init(struct drm_plane *plane);
 
 #endif /* __INTEL_COLOR_PIPELINE_H__ */
