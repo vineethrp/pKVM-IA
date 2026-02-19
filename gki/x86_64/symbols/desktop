@@ -1797,6 +1797,7 @@
   mei_start
   mei_stop
   mei_write_is_idle
+  mem_alloc_profiling_key
   memchr
   memchr_inv
   memcmp
