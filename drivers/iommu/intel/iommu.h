@@ -28,8 +28,6 @@
 #include <asm/iommu.h>
 #include <uapi/linux/iommufd.h>
 
-#include "pkvm_iommu.h"
-
 /*
  * VT-d hardware uses 4KiB page size regardless of host page size.
  */
