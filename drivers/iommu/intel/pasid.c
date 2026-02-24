@@ -18,12 +18,6 @@
 #include <linux/pci-ats.h>
 #ifndef __PKVM_HYP__
 #include <linux/spinlock.h>
-#else
-#include "pkvm/memory.h"
-#undef phys_to_virt
-#define phys_to_virt __pkvm_va
-#undef virt_to_phys
-#define virt_to_phys __pkvm_pa
 #endif
 
 #include "iommu.h"
@@ -112,7 +106,6 @@ void intel_pasid_free_table(struct device *dev)
 	iommu_free_pages(pasid_table->table);
 	kfree(pasid_table);
 }
-#endif /* !__PKVM_HYP__ */
 
 struct pasid_table *intel_pasid_get_table(struct device *dev)
 {
@@ -158,12 +151,8 @@ retry:
 	if (!entries) {
 		u64 tmp;
 
-#ifndef __PKVM_HYP__
 		entries = iommu_alloc_pages_node_sz(info->iommu->node,
 						    GFP_ATOMIC, SZ_4K);
-#else
-		entries = pkvm_iommu_ts_page(info->iommu);
-#endif
 		if (!entries)
 			return ERR_PTR(-ENOMEM);
 
@@ -176,11 +165,7 @@ retry:
 		tmp = 0ULL;
 		if (!try_cmpxchg64(&dir[dir_index].val, &tmp,
 				   (u64)virt_to_phys(entries) | PASID_PTE_PRESENT)) {
-#ifndef __PKVM_HYP__
 			iommu_free_pages(entries);
-#else
-			info->iommu->ts_page = entries;
-#endif
 			goto retry;
 		}
 		if (!ecap_coherent(info->iommu->ecap)) {
@@ -236,10 +221,8 @@ devtlb_invalidation_with_pasid(struct intel_iommu *iommu,
 	if (!info || !info->ats_enabled)
 		return;
 
-#ifndef __PKVM_HYP__
 	if (pci_dev_is_disconnected(to_pci_dev(dev)))
 		return;
-#endif
 
 	sid = PCI_DEVID(info->bus, info->devfn);
 	qdep = info->ats_qdep;
@@ -263,17 +246,17 @@ void intel_pasid_tear_down_entry(struct intel_iommu *iommu, struct device *dev,
 	struct pasid_entry *pte;
 	u16 did, pgtt;
 
-	iommu_lock(iommu);
+	spin_lock(&iommu->lock);
 	pte = intel_pasid_get_entry(dev, pasid);
 	if (WARN_ON(IS_ERR(pte))) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return;
 	}
 
 	if (!pasid_pte_is_present(pte)) {
 		if (!pasid_pte_is_fault_disabled(pte)) {
 			WARN_ON(READ_ONCE(pte->val[0]) != 0);
-			iommu_unlock(iommu);
+			spin_unlock(&iommu->lock);
 			return;
 		}
 
@@ -284,10 +267,8 @@ void intel_pasid_tear_down_entry(struct intel_iommu *iommu, struct device *dev,
 		 * drain the PRQ for the PASID before return.
 		 */
 		pasid_clear_entry(pte);
-		iommu_unlock(iommu);
-#ifndef __PKVM_HYP__
+		spin_unlock(&iommu->lock);
 		intel_iommu_drain_pasid_prq(dev, pasid);
-#endif
 
 		return;
 	}
@@ -295,7 +276,7 @@ void intel_pasid_tear_down_entry(struct intel_iommu *iommu, struct device *dev,
 	did = pasid_get_domain_id(pte);
 	pgtt = pasid_pte_get_pgtt(pte);
 	intel_pasid_clear_entry(dev, pasid, fault_ignore);
-	iommu_unlock(iommu);
+	spin_unlock(&iommu->lock);
 
 	if (!ecap_coherent(iommu->ecap))
 		clflush_cache_range(pte, sizeof(*pte));
@@ -308,10 +289,8 @@ void intel_pasid_tear_down_entry(struct intel_iommu *iommu, struct device *dev,
 		iommu->flush.flush_iotlb(iommu, did, 0, 0, DMA_TLB_DSI_FLUSH);
 
 	devtlb_invalidation_with_pasid(iommu, dev, pasid);
-#ifndef __PKVM_HYP__
 	if (!fault_ignore)
 		intel_iommu_drain_pasid_prq(dev, pasid);
-#endif
 }
 
 /*
@@ -375,9 +354,7 @@ static void pasid_pte_config_first_level(struct intel_iommu *iommu,
 					 phys_addr_t fsptptr, u16 did,
 					 int flags)
 {
-#ifndef __PKVM_HYP__
 	lockdep_assert_held(&iommu->lock);
-#endif
 
 	pasid_clear_entry(pte);
 
@@ -406,32 +383,32 @@ int intel_pasid_setup_first_level(struct intel_iommu *iommu, struct device *dev,
 	struct pasid_entry *pte;
 
 	if (!ecap_flts(iommu->ecap)) {
-		pr_err("No first level translation support on iommu%d\n",
-		       iommu->seq_id);
+		pr_err("No first level translation support on %s\n",
+		       iommu->name);
 		return -EINVAL;
 	}
 
 	if ((flags & PASID_FLAG_FL5LP) && !cap_fl5lp_support(iommu->cap)) {
-		pr_err("No 5-level paging support for first-level on iommu%d\n",
-		       iommu->seq_id);
+		pr_err("No 5-level paging support for first-level on %s\n",
+		       iommu->name);
 		return -EINVAL;
 	}
 
-	iommu_lock(iommu);
+	spin_lock(&iommu->lock);
 	pte = intel_pasid_get_entry(dev, pasid);
 	if (IS_ERR(pte)) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return PTR_ERR(pte);
 	}
 
 	if (pasid_pte_is_present(pte)) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return -EBUSY;
 	}
 
 	pasid_pte_config_first_level(iommu, pte, fsptptr, did, flags);
 
-	iommu_unlock(iommu);
+	spin_unlock(&iommu->lock);
 
 	pasid_flush_caches(iommu, pte, pasid, did);
 
@@ -446,40 +423,38 @@ int intel_pasid_replace_first_level(struct intel_iommu *iommu,
 	struct pasid_entry *pte, new_pte;
 
 	if (!ecap_flts(iommu->ecap)) {
-		pr_err("No first level translation support on iommu%d\n",
-		       iommu->seq_id);
+		pr_err("No first level translation support on %s\n",
+		       iommu->name);
 		return -EINVAL;
 	}
 
 	if ((flags & PASID_FLAG_FL5LP) && !cap_fl5lp_support(iommu->cap)) {
-		pr_err("No 5-level paging support for first-level on iommu%d\n",
-		       iommu->seq_id);
+		pr_err("No 5-level paging support for first-level on %s\n",
+		       iommu->name);
 		return -EINVAL;
 	}
 
 	pasid_pte_config_first_level(iommu, &new_pte, fsptptr, did, flags);
 
-	iommu_lock(iommu);
+	spin_lock(&iommu->lock);
 	pte = intel_pasid_get_entry(dev, pasid);
 	if (IS_ERR(pte)) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return PTR_ERR(pte);
 	}
 
 	if (!pasid_pte_is_present(pte)) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return -EINVAL;
 	}
 
 	WARN_ON(old_did != pasid_get_domain_id(pte));
 
 	*pte = new_pte;
-	iommu_unlock(iommu);
+	spin_unlock(&iommu->lock);
 
 	intel_pasid_flush_present(iommu, dev, pasid, old_did, pte);
-#ifndef __PKVM_HYP__
 	intel_iommu_drain_pasid_prq(dev, pasid);
-#endif
 
 	return 0;
 }
@@ -492,9 +467,7 @@ static void pasid_pte_config_second_level(struct intel_iommu *iommu,
 					  u64 pgd_val, int agaw, u16 did,
 					  bool dirty_tracking)
 {
-#ifndef __PKVM_HYP__
 	lockdep_assert_held(&iommu->lock);
-#endif
 
 	pasid_clear_entry(pte);
 	pasid_set_domain_id(pte, did);
@@ -511,50 +484,42 @@ static void pasid_pte_config_second_level(struct intel_iommu *iommu,
 
 int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 				   struct dmar_domain *domain,
-#ifndef __PKVM_HYP__
 				   struct device *dev, u32 pasid)
-#else
-				   struct device *dev, u16 did, u32 pasid)
-#endif
 {
 	struct pasid_entry *pte;
 	struct dma_pte *pgd;
 	u64 pgd_val;
-#ifndef __PKVM_HYP__
 	u16 did;
-#endif
 
 	/*
 	 * If hardware advertises no support for second level
 	 * translation, return directly.
 	 */
 	if (!ecap_slts(iommu->ecap)) {
-		pr_err("No second level translation support on iommu%d\n",
-		       iommu->seq_id);
+		pr_err("No second level translation support on %s\n",
+		       iommu->name);
 		return -EINVAL;
 	}
 
 	pgd = domain->pgd;
 	pgd_val = virt_to_phys(pgd);
-#ifndef __PKVM_HYP__
 	did = domain_id_iommu(domain, iommu);
-#endif
 
-	iommu_lock(iommu);
+	spin_lock(&iommu->lock);
 	pte = intel_pasid_get_entry(dev, pasid);
 	if (IS_ERR(pte)) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return PTR_ERR(pte);
 	}
 
 	if (pasid_pte_is_present(pte)) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return -EBUSY;
 	}
 
 	pasid_pte_config_second_level(iommu, pte, pgd_val, domain->agaw,
 				      did, domain->dirty_tracking);
-	iommu_unlock(iommu);
+	spin_unlock(&iommu->lock);
 
 	pasid_flush_caches(iommu, pte, pasid, did);
 
@@ -563,66 +528,55 @@ int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 
 int intel_pasid_replace_second_level(struct intel_iommu *iommu,
 				     struct dmar_domain *domain,
-#ifndef __PKVM_HYP__
 				     struct device *dev, u16 old_did,
-#else
-				     struct device *dev, u16 did, u16 old_did,
-#endif
 				     u32 pasid)
 {
 	struct pasid_entry *pte, new_pte;
 	struct dma_pte *pgd;
 	u64 pgd_val;
-#ifndef __PKVM_HYP__
 	u16 did;
-#endif
 
 	/*
 	 * If hardware advertises no support for second level
 	 * translation, return directly.
 	 */
 	if (!ecap_slts(iommu->ecap)) {
-		pr_err("No second level translation support on iommu%d\n",
-		       iommu->seq_id);
+		pr_err("No second level translation support on %s\n",
+		       iommu->name);
 		return -EINVAL;
 	}
 
 	pgd = domain->pgd;
 	pgd_val = virt_to_phys(pgd);
-#ifndef __PKVM_HYP__
 	did = domain_id_iommu(domain, iommu);
-#endif
 
 	pasid_pte_config_second_level(iommu, &new_pte, pgd_val,
 				      domain->agaw, did,
 				      domain->dirty_tracking);
 
-	iommu_lock(iommu);
+	spin_lock(&iommu->lock);
 	pte = intel_pasid_get_entry(dev, pasid);
 	if (IS_ERR(pte)) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return PTR_ERR(pte);
 	}
 
 	if (!pasid_pte_is_present(pte)) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return -EINVAL;
 	}
 
 	WARN_ON(old_did != pasid_get_domain_id(pte));
 
 	*pte = new_pte;
-	iommu_unlock(iommu);
+	spin_unlock(&iommu->lock);
 
 	intel_pasid_flush_present(iommu, dev, pasid, old_did, pte);
-#ifndef __PKVM_HYP__
 	intel_iommu_drain_pasid_prq(dev, pasid);
-#endif
 
 	return 0;
 }
 
-#ifndef __PKVM_HYP__
 /*
  * Set up dirty tracking on a second only or nested translation type.
  */
