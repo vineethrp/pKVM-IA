@@ -1887,10 +1887,8 @@ static int device_def_domain_type(struct device *dev)
 	return 0;
 }
 
-static int intel_iommu_init_qi(struct intel_iommu *iommu)
+static void intel_iommu_init_qi(struct intel_iommu *iommu)
 {
-	int ret = 0;
-
 	/*
 	 * Start from the sane iommu hardware state.
 	 * If the queued invalidation is already initialized by us
@@ -1907,17 +1905,9 @@ static int intel_iommu_init_qi(struct intel_iommu *iommu)
 		 * before OS handover.
 		 */
 		dmar_disable_qi(iommu);
-	} else if (pkvm_enabled()) {
-		/* Re-initialize QI to start from a clean state. */
-		dmar_reenable_qi(iommu);
 	}
 
-	ret = dmar_enable_qi(iommu);
-	if (ret) {
-		/* pKVM requires QI enabled */
-		if (pkvm_enabled())
-			return ret;
-
+	if (dmar_enable_qi(iommu)) {
 		/*
 		 * Queued Invalidate not enabled, use Register Based Invalidate
 		 */
@@ -1930,8 +1920,6 @@ static int intel_iommu_init_qi(struct intel_iommu *iommu)
 		iommu->flush.flush_iotlb = qi_flush_iotlb;
 		pr_info("%s: Using Queued invalidation\n", iommu->name);
 	}
-
-	return ret;
 }
 
 static int copy_context_table(struct intel_iommu *iommu,
@@ -2137,10 +2125,7 @@ static int __init init_dmars(void)
 						   intel_pasid_max_id);
 		}
 
-		ret = intel_iommu_init_qi(iommu);
-		if (ret)
-			goto free_iommu;
-
+		intel_iommu_init_qi(iommu);
 		init_translation_status(iommu);
 
 		if (translation_pre_enabled(iommu) && !is_kdump_kernel()) {
