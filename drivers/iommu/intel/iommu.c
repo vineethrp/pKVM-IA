@@ -3518,18 +3518,7 @@ static struct dmar_domain *paging_domain_alloc(struct device *dev, bool first_st
 		kfree(domain);
 		return ERR_PTR(-ENOMEM);
 	}
-
-	if (pkvm_enabled()) {
-		int ret = pv_alloc_domain(info, domain);
-
-		if (ret) {
-			iommu_free_pages(domain->pgd);
-			kfree(domain);
-			domain = ERR_PTR(ret);
-		}
-	} else {
-		domain_flush_cache(domain, domain->pgd, PAGE_SIZE);
-	}
+	domain_flush_cache(domain, domain->pgd, PAGE_SIZE);
 
 	return domain;
 }
@@ -3641,16 +3630,6 @@ static void intel_iommu_domain_free(struct iommu_domain *domain)
 		domain_unmap(dmar_domain, 0, DOMAIN_MAX_PFN(dmar_domain->gaw),
 			     &freelist);
 		iommu_put_pages_list(&freelist);
-
-		if (pkvm_enabled()) {
-			int ret = pv_free_domain(dmar_domain);
-
-			if (ret)
-				pr_warn("%s: pkvm failed to free domain[pgd=%p] (err=%d)\n",
-					__func__, dmar_domain->pgd, ret);
-			else
-				iommu_free_pages(dmar_domain->pgd);
-		}
 	}
 
 	kfree(dmar_domain->qi_batch);
