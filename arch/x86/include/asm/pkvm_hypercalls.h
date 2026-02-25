@@ -89,23 +89,6 @@ PKVM_HC(vm_mmu_map)
 PKVM_HC(vm_mmu_unmap)
 PKVM_HC(vm_mmu_age)
 
-/* IOMMU hypercalls */
-#ifdef CONFIG_PKVM_INTEL
-PKVM_HC_OUT(iommu_mmio_read)
-PKVM_HC(iommu_mmio_write)
-PKVM_HC(iommu_iec_flush)
-PKVM_HC_IN(iommu_clear_ce)
-PKVM_HC_INOUT(iommu_set_lm_ce)
-PKVM_HC_INOUT(iommu_set_sm_ce)
-PKVM_HC_INOUT(iommu_pasid_setup_fl)
-PKVM_HC_INOUT(iommu_pasid_setup_sl)
-PKVM_HC_IN(iommu_pasid_teardown)
-PKVM_HC_IN(iommu_alloc_domain)
-PKVM_HC_OUT(iommu_free_domain)
-PKVM_HC_INOUT(iommu_domain_map)
-PKVM_HC(iommu_domain_unmap)
-#endif
-
 #undef PKVM_HC
 #undef PKVM_HC_OUT
 #undef PKVM_HC_IN

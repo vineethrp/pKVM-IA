@@ -96,7 +96,7 @@ static void init_ir_status(struct intel_iommu *iommu)
 {
 	u32 gsts;
 
-	gsts = dmar_readl(iommu, DMAR_GSTS_REG);
+	gsts = readl(iommu->reg + DMAR_GSTS_REG);
 	if (gsts & DMA_GSTS_IRES)
 		iommu->flags |= VTD_FLAG_IRQ_REMAP_PRE_ENABLED;
 }
@@ -138,6 +138,19 @@ static int alloc_irte(struct intel_iommu *iommu,
 	raw_spin_unlock_irqrestore(&irq_2_ir_lock, flags);
 
 	return index;
+}
+
+static int qi_flush_iec(struct intel_iommu *iommu, int index, int mask)
+{
+	struct qi_desc desc;
+
+	desc.qw0 = QI_IEC_IIDEX(index) | QI_IEC_TYPE | QI_IEC_IM(mask)
+		   | QI_IEC_SELECTIVE;
+	desc.qw1 = 0;
+	desc.qw2 = 0;
+	desc.qw3 = 0;
+
+	return qi_submit_sync(iommu, &desc, 1, 0);
 }
 
 static int modify_irte(struct irq_2_iommu *irq_iommu,
@@ -409,7 +422,7 @@ static int iommu_load_old_irte(struct intel_iommu *iommu)
 	u64 irta;
 
 	/* Check whether the old ir-table has the same size as ours */
-	irta = dmar_readq(iommu, DMAR_IRTA_REG);
+	irta = dmar_readq(iommu->reg + DMAR_IRTA_REG);
 	if ((irta & INTR_REMAP_TABLE_REG_SIZE_MASK)
 	     != INTR_REMAP_TABLE_REG_SIZE)
 		return -EINVAL;
@@ -452,14 +465,14 @@ static void iommu_set_irq_remapping(struct intel_iommu *iommu, int mode)
 
 	raw_spin_lock_irqsave(&iommu->register_lock, flags);
 
-	dmar_writeq(iommu, DMAR_IRTA_REG,
+	dmar_writeq(iommu->reg + DMAR_IRTA_REG,
 		    (addr) | IR_X2APIC_MODE(mode) | INTR_REMAP_TABLE_REG_SIZE);
 
 	/* Set interrupt-remapping table pointer */
-	dmar_writel(iommu, DMAR_GCMD_REG, iommu->gcmd | DMA_GCMD_SIRTP);
+	writel(iommu->gcmd | DMA_GCMD_SIRTP, iommu->reg + DMAR_GCMD_REG);
 
 	IOMMU_WAIT_OP(iommu, DMAR_GSTS_REG,
-		      dmar_readl, (sts & DMA_GSTS_IRTPS), sts);
+		      readl, (sts & DMA_GSTS_IRTPS), sts);
 	raw_spin_unlock_irqrestore(&iommu->register_lock, flags);
 
 	/*
@@ -479,16 +492,16 @@ static void iommu_enable_irq_remapping(struct intel_iommu *iommu)
 
 	/* Enable interrupt-remapping */
 	iommu->gcmd |= DMA_GCMD_IRE;
-	dmar_writel(iommu, DMAR_GCMD_REG, iommu->gcmd);
+	writel(iommu->gcmd, iommu->reg + DMAR_GCMD_REG);
 	IOMMU_WAIT_OP(iommu, DMAR_GSTS_REG,
-		      dmar_readl, (sts & DMA_GSTS_IRES), sts);
+		      readl, (sts & DMA_GSTS_IRES), sts);
 
 	/* Block compatibility-format MSIs */
 	if (sts & DMA_GSTS_CFIS) {
 		iommu->gcmd &= ~DMA_GCMD_CFI;
-		dmar_writel(iommu, DMAR_GCMD_REG, iommu->gcmd);
+		writel(iommu->gcmd, iommu->reg + DMAR_GCMD_REG);
 		IOMMU_WAIT_OP(iommu, DMAR_GSTS_REG,
-			      dmar_readl, !(sts & DMA_GSTS_CFIS), sts);
+			      readl, !(sts & DMA_GSTS_CFIS), sts);
 	}
 
 	/*
@@ -645,15 +658,15 @@ static void iommu_disable_irq_remapping(struct intel_iommu *iommu)
 
 	raw_spin_lock_irqsave(&iommu->register_lock, flags);
 
-	sts = dmar_readl(iommu, DMAR_GSTS_REG);
+	sts = readl(iommu->reg + DMAR_GSTS_REG);
 	if (!(sts & DMA_GSTS_IRES))
 		goto end;
 
 	iommu->gcmd &= ~DMA_GCMD_IRE;
-	dmar_writel(iommu, DMAR_GCMD_REG, iommu->gcmd);
+	writel(iommu->gcmd, iommu->reg + DMAR_GCMD_REG);
 
 	IOMMU_WAIT_OP(iommu, DMAR_GSTS_REG,
-		      dmar_readl, !(sts & DMA_GSTS_IRES), sts);
+		      readl, !(sts & DMA_GSTS_IRES), sts);
 
 end:
 	raw_spin_unlock_irqrestore(&iommu->register_lock, flags);
