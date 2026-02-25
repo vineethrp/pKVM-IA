@@ -304204,7 +304204,7 @@ elf_symbol {
   name: "_trace_android_vh_pcpu_rwsem_lock_acquired"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x02d74443
+  crc: 0x66e50e6e
   type_id: 0x14f50ddf
   full_name: "_trace_android_vh_pcpu_rwsem_lock_acquired"
 }
@@ -304213,7 +304213,7 @@ elf_symbol {
   name: "_trace_android_vh_pcpu_rwsem_lock_released"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x02d74443
+  crc: 0x66e50e6e
   type_id: 0x14f50ddf
   full_name: "_trace_android_vh_pcpu_rwsem_lock_released"
 }
@@ -319879,7 +319879,7 @@ elf_symbol {
   name: "mei_deregister"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xd9bd2969
+  crc: 0xe377669d
   type_id: 0x11dbe926
   full_name: "mei_deregister"
 }
@@ -319933,7 +319933,7 @@ elf_symbol {
   name: "mei_register"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x2098a611
+  crc: 0xd16a49c2
   type_id: 0x9cca387f
   full_name: "mei_register"
 }
@@ -319942,7 +319942,7 @@ elf_symbol {
   name: "mei_restart"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xf418139a
+  crc: 0x0ba67352
   type_id: 0x9cc35b9a
   full_name: "mei_restart"
 }
@@ -319951,7 +319951,7 @@ elf_symbol {
   name: "mei_start"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xf418139a
+  crc: 0x0ba67352
   type_id: 0x9cc35b9a
   full_name: "mei_start"
 }
@@ -319960,7 +319960,7 @@ elf_symbol {
   name: "mei_stop"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xd9bd2969
+  crc: 0xe377669d
   type_id: 0x11dbe926
   full_name: "mei_stop"
 }
@@ -319969,7 +319969,7 @@ elf_symbol {
   name: "mei_write_is_idle"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0x7e4b6ec2
+  crc: 0xc74055df
   type_id: 0xffe7e3b1
   full_name: "mei_write_is_idle"
 }
@@ -332054,7 +332054,7 @@ elf_symbol {
   name: "typec_mode_selection_delete"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xc997027e
+  crc: 0x6388ae91
   type_id: 0x148f719a
   full_name: "typec_mode_selection_delete"
 }
@@ -332063,7 +332063,7 @@ elf_symbol {
   name: "typec_mode_selection_start"
   is_defined: true
   symbol_type: FUNCTION
-  crc: 0xff9d0809
+  crc: 0xa5445bfe
   type_id: 0x9890b7e7
   full_name: "typec_mode_selection_start"
 }
