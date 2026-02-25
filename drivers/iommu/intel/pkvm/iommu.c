@@ -8,7 +8,6 @@
 #include "pkvm/pkvm.h"
 #include "pkvm/debug.h"
 #include "iommu.h"
-#include "iommu_domain.h"
 
 /*
  * IOMMU supported page size and page levels for second stage page table.
@@ -34,6 +33,16 @@ int nr_satc_devs;
 #define PKVM_MAX_IOMMU_NUM	16
 static struct intel_iommu iommus[PKVM_MAX_IOMMU_NUM];
 static int nr_iommus;
+
+/*
+ * Flag denoting if all IOMMUs in the system have page walk coherency support.
+ * This is needed to decide whether to flush cpu caches on host ept updates as
+ * pKVM uses host ept as the second stage page table when host configures device
+ * for passthrough mode. IOMMUs that doesn't have page walk coherency support
+ * needs the pagetable updates to be reflected in memory and hence we need to
+ * flush cpu caches on host ept update if one or more IOMMUs doesn't have page
+ * walk coherency support.
+ */
 static bool iommu_paging_structure_coherent = true;
 
 bool pkvm_iommu_paging_structure_coherency(void)
@@ -256,8 +265,10 @@ static int handle_gcmd_srtp(struct intel_iommu *iommu)
 		return ret;
 	}
 
-	set_root_table(iommu);
 	iommu->root_entry = __pkvm_va(root_pa);
+	__iommu_flush_cache(iommu, iommu->root_entry, VTD_PAGE_SIZE);
+
+	set_root_table(iommu);
 
 	pkvm_dbg("iommu%d Set Root Table(%llx)!\n", iommu->seq_id, iommu->vrta);
 	return 0;
@@ -332,7 +343,7 @@ static int handle_global_cmd(struct intel_iommu *iommu, u32 val)
 	return handle_gcmd_direct(iommu, changed, !!(val & changed));
 }
 
-static int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
+int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 {
 	struct intel_iommu *iommu = iommu_from_phys(phys);
 	unsigned long offset;
@@ -372,7 +383,7 @@ static int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 	return ret;
 }
 
-static int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
+int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 {
 	struct intel_iommu *iommu = iommu_from_phys(phys);
 	unsigned long offset;
@@ -435,56 +446,6 @@ static int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 	return ret;
 }
 
-static int pkvm_handle_iommu_hypercall(void *in, void *out)
-{
-	struct iommu_hc_data *data_in = (struct iommu_hc_data *)in;
-	int ret;
-
-	switch (data_in->hc_num) {
-	case iec_flush:
-		ret = pkvm_iommu_iec_flush(&data_in->iec_flush);
-		break;
-	case clear_ce:
-		ret = pkvm_iommu_clear_ce(&data_in->clear_ce);
-		break;
-	case set_lm_ce:
-		ret = pkvm_iommu_set_lm_ce(&data_in->set_lm_ce);
-		break;
-	case set_sm_ce:
-		ret = pkvm_iommu_set_sm_ce(&data_in->set_sm_ce);
-		break;
-	case pasid_setup_fl:
-		ret = pkvm_iommu_pasid_setup_fl(&data_in->pasid_setup_fl);
-		break;
-	case pasid_setup_sl:
-		ret = pkvm_iommu_pasid_setup_sl(&data_in->pasid_setup_sl);
-		break;
-	case pasid_teardown:
-		ret = pkvm_iommu_pasid_teardown(&data_in->pasid_teardown);
-		break;
-	case alloc_domain:
-		ret = pkvm_iommu_alloc_domain(&data_in->alloc_domain);
-		break;
-	case free_domain:
-		ret = pkvm_iommu_free_domain(&data_in->free_domain);
-		break;
-	default:
-		pkvm_err("Invalid hypercall: %d\n", data_in->hc_num);
-		ret = -EINVAL;
-	}
-
-	*(struct iommu_hc_data *)out = *data_in;
-	return ret;
-}
-
-struct pkvm_iommu_ops iommu_ops = {
-	.mmio_read = pkvm_iommu_mmio_read,
-	.mmio_write = pkvm_iommu_mmio_write,
-	.domain_map = pkvm_iommu_domain_map,
-	.domain_unmap = pkvm_iommu_domain_unmap,
-	.hypercall = pkvm_handle_iommu_hypercall,
-};
-
 int __init prepare_iommu(struct intel_iommu_info *info)
 {
 	struct intel_iommu *iommu;
@@ -501,9 +462,7 @@ int __init prepare_iommu(struct intel_iommu_info *info)
 	iommu->msagaw = info->msagaw;
 	iommu->seq_id = info->seq_id;
 
-	if (iommu_paging_structure_coherent &&
-	    !iommu_paging_structure_coherency(iommu))
-		iommu_paging_structure_coherent = false;
+	iommu_paging_structure_coherent &= iommu_paging_structure_coherency(iommu);
 
 	return 0;
 }
@@ -553,13 +512,14 @@ int pkvm_intel_iommu_init(void)
 		if (ret)
 			return ret;
 	}
-	pkvm_register_iommu_ops(&iommu_ops);
+
 	init_pt_domain();
+
 	return 0;
 }
 
-void pkvm_iommu_pt_flush(unsigned long vaddr, unsigned long size)
+void pkvm_iommu_pt_flush(unsigned long paddr, unsigned long size)
 {
 	if (pt_domain.qi_batch)
-		cache_tag_flush_range(&pt_domain, vaddr, vaddr + size - 1, 0);
+		cache_tag_flush_range(&pt_domain, paddr, paddr + size - 1, 0);
 }

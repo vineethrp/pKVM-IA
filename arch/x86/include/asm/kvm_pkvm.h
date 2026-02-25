@@ -52,6 +52,93 @@ struct pkvm_mem_info {
 	u64 prot;
 };
 
+#ifdef CONFIG_PKVM_INTEL
+struct clear_ce_data {
+	u64 phys;
+	u8 bus;
+	u8 devfn;
+	u8 ats_qdep;
+	u8 ats_enabled: 1;
+	u8 ats_supported: 1;
+};
+
+struct set_lm_ce_data {
+	u64 phys;
+	u64 pgd_gpa;
+	u64 donation_page_gpa;
+	u16 did;
+	u8 bus;
+	u8 devfn;
+	u8 ats_qdep;
+	u8 ats_enabled: 1;
+	u8 ats_supported: 1;
+};
+
+struct set_sm_ce_data {
+	u64 phys;
+	u64 pasid_table_gpa;
+	u64 donation_page_gpa;
+	u32 max_pasid;
+	u8 bus;
+	u8 devfn;
+	u8 ats_qdep;
+	u8 ats_enabled: 1;
+	u8 ats_supported: 1;
+	u8 pasid_supported: 3;
+	u8 pasid_enabled: 1;
+};
+
+struct pasid_setup_fl_data {
+	u64 phys;
+	u64 fsptptr_gpa;
+	u64 donation_page_gpa;
+	u32 pasid;
+	u32 flags;
+	u16 did;
+	u16 old_did; /* replace_fl */
+	u8 bus;
+	u8 devfn;
+	u8 ats_qdep;
+	u8 ats_enabled: 1;
+	u8 ats_supported: 1;
+};
+
+struct pasid_setup_sl_data {
+	u64 phys;
+	u64 ssptptr_gpa;
+	u64 donation_page_gpa;
+	u32 pasid;
+	u16 did;
+	u16 old_did; /* replace_sl */
+	u8 bus;
+	u8 devfn;
+	u8 ats_qdep;
+	u8 ats_enabled: 1;
+	u8 ats_supported: 1;
+};
+
+struct pasid_teardown_data {
+	u64 phys;
+	u32 pasid;
+	u8 bus;
+	u8 devfn;
+	u8 ats_qdep;
+	u8 ats_enabled: 1;
+	u8 ats_supported: 1;
+};
+
+struct alloc_domain_data {
+	u64 phys;
+	u64 max_addr;
+	u64 pgd_gpa;
+	u16 bdf;
+	u16 gaw;
+	u8 agaw;
+	u8 iommu_superpage;
+	u8 iommu_coherency;
+	u8 use_first_level;
+};
+
 struct domain_map_data {
 	u64 pgd_gpa;
 	u64 iov_pfn;
@@ -60,32 +147,7 @@ struct domain_map_data {
 	u64 prot;
 	struct pkvm_memcache mc;
 };
-
-struct pkvm_iommu_ops {
-	/*
-	 * Common callbacks for all vendors implementations.
-	 * These hypercalls are generic in the sense that
-	 * generic IOMMU driver calls into vendor implementation
-	 * with same arguments. Even though the implementation
-	 * is in vendor code, there is no specific vendor specific
-	 * details in the API. Having it as separate callbacks
-	 * saves us one extra redirection.
-	 */
-	int (*mmio_read)(u64 phys, int len, u64 *val);
-	int (*mmio_write)(u64 phys, int len, u64 val);
-
-	int (*domain_map)(struct domain_map_data *in, struct domain_map_data *out);
-	int (*domain_unmap)(u64 pgd_gpa, u64 start_pfn, u64 last_pfn);
-
-	/*
-	 * Vendor specific hypercall handler, that abstracts the
-	 * hypercall name arguments which might be based on the
-	 * hardware specifics of vendor IOMMU.
-	 * There is one redirection where the vendor implementation
-	 * of this callback calls into the vendor specific hypercall.
-	 */
-	int (*hypercall)(void *in, void *out);
-};
+#endif
 
 #define TO_PKVM_HC(f)		CONCATENATE(__pkvm__, f)
 
@@ -161,27 +223,43 @@ union pkvm_hc_data {
 #define HOST_RESET_MMU				3
 #define HOST_APF_READY				4
 	} vcpu_run;
+#ifdef CONFIG_PKVM_INTEL
 	struct {
 		u64 val;
 	} iommu_mmio_read;
+	struct {
+		struct clear_ce_data data;
+	} iommu_clear_ce;
+	union {
+		struct set_lm_ce_data in;
+		struct set_lm_ce_data out;
+	} iommu_set_lm_ce;
+	union {
+		struct set_sm_ce_data in;
+		struct set_sm_ce_data out;
+	} iommu_set_sm_ce;
+	union {
+		struct pasid_setup_fl_data in;
+		struct pasid_setup_fl_data out;
+	} iommu_pasid_setup_fl;
+	union {
+		struct pasid_setup_sl_data in;
+		struct pasid_setup_sl_data out;
+	} iommu_pasid_setup_sl;
+	struct {
+		struct pasid_teardown_data data;
+	} iommu_pasid_teardown;
+	struct {
+		struct alloc_domain_data data;
+	} iommu_alloc_domain;
+	struct {
+		struct pkvm_memcache memcache;
+	} iommu_free_domain;
 	union {
 		struct domain_map_data in;
 		struct domain_map_data out;
 	} iommu_domain_map;
-	/*
-	 * Use the maximum supported size for iommu hypercall
-	 * Vendor specific iommu hypercall arguments are not
-	 * exposed here and the vendor implementation casts it
-	 * to its own representation.
-	 */
-	union {
-		struct {
-			u64 data[PKVM_HC_DATA_MAX_NUM];
-		} in;
-		struct {
-			u64 data[PKVM_HC_DATA_MAX_NUM];
-		} out;
-	} iommu_hypercall;
+#endif
 	struct {
 		u64 data[PKVM_HC_DATA_MAX_NUM];
 	} raw;
@@ -562,7 +640,7 @@ extern pteval_t pkvm_sym(__default_kernel_pte_mask);
 #ifdef CONFIG_AMD_MEM_ENCRYPT
 extern u64 pkvm_sym(sme_me_mask);
 #endif
-extern uint16_t	pkvm_sym(__cachemode2pte_tbl)[];
+extern uint16_t pkvm_sym(__cachemode2pte_tbl)[];
 extern struct pkvm_init_ops *pkvm_sym(init_ops);
 extern struct cpumask pkvm_sym(__cpu_possible_mask);
 extern unsigned int pkvm_sym(nr_cpu_ids);
@@ -789,8 +867,6 @@ static inline size_t pkvm_guest_initial_fpstate_size(struct kvm *kvm)
 
 #undef KVM_BUG
 #define KVM_BUG(cond, kvm, fmt...)		KVM_BUG_ON(cond, kvm)
-
-void pkvm_register_iommu_ops(struct pkvm_iommu_ops *ops);
 
 #endif /* __PKVM_HYP__ */
 

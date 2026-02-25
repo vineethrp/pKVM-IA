@@ -16,21 +16,25 @@
 #include <linux/memory.h>
 #include <linux/pci.h>
 #include <linux/pci-ats.h>
-#ifndef __PKVM_HYP__
 #include <linux/spinlock.h>
-#else
-#include "pkvm/memory.h"
-#undef phys_to_virt
-#define phys_to_virt __pkvm_va
-#undef virt_to_phys
-#define virt_to_phys __pkvm_pa
-#endif
 
 #include "iommu.h"
 #include "pasid.h"
 #include "../iommu-pages.h"
 
-#ifndef __PKVM_HYP__
+#ifdef __PKVM_HYP__
+#include "pkvm/memory.h"
+#undef phys_to_virt
+#define phys_to_virt __pkvm_va
+#undef virt_to_phys
+#define virt_to_phys __pkvm_pa
+#undef spin_lock
+#define spin_lock pkvm_spin_lock
+#undef spin_unlock
+#define spin_unlock pkvm_spin_unlock
+
+#define dev_iommu_priv_get pkvm_dev_iommu_priv_get
+#else
 /*
  * Intel IOMMU system wide PASID name space:
  */
@@ -112,9 +116,13 @@ void intel_pasid_free_table(struct device *dev)
 	iommu_free_pages(pasid_table->table);
 	kfree(pasid_table);
 }
-#endif /* !__PKVM_HYP__ */
+#endif /* __PKVM_HYP__ */
 
+#ifndef __PKVM_HYP__
 struct pasid_table *intel_pasid_get_table(struct device *dev)
+#else
+struct pasid_table *intel_pasid_get_table(struct pkvm_device *dev)
+#endif
 {
 	struct device_domain_info *info;
 
@@ -125,7 +133,11 @@ struct pasid_table *intel_pasid_get_table(struct device *dev)
 	return info->pasid_table;
 }
 
+#ifndef __PKVM_HYP__
 static int intel_pasid_get_dev_max_id(struct device *dev)
+#else
+static int intel_pasid_get_dev_max_id(struct pkvm_device *dev)
+#endif
 {
 	struct device_domain_info *info;
 
@@ -136,7 +148,11 @@ static int intel_pasid_get_dev_max_id(struct device *dev)
 	return info->pasid_table->max_pasid;
 }
 
+#ifndef __PKVM_HYP__
 static struct pasid_entry *intel_pasid_get_entry(struct device *dev, u32 pasid)
+#else
+static struct pasid_entry *intel_pasid_get_entry(struct pkvm_device *dev, u32 pasid)
+#endif
 {
 	struct device_domain_info *info;
 	struct pasid_table *pasid_table;
@@ -162,10 +178,13 @@ retry:
 		entries = iommu_alloc_pages_node_sz(info->iommu->node,
 						    GFP_ATOMIC, SZ_4K);
 #else
-		entries = pkvm_iommu_ts_page(info->iommu);
+		entries = pkvm_iommu_donation_page(info->iommu);
 #endif
 		if (!entries)
 			return ERR_PTR(-ENOMEM);
+
+		if (!ecap_coherent(info->iommu->ecap))
+			clflush_cache_range(entries, VTD_PAGE_SIZE);
 
 		/*
 		 * The pasid directory table entry won't be freed after
@@ -179,14 +198,12 @@ retry:
 #ifndef __PKVM_HYP__
 			iommu_free_pages(entries);
 #else
-			info->iommu->ts_page = entries;
+			info->iommu->donation_page = entries;
 #endif
 			goto retry;
 		}
-		if (!ecap_coherent(info->iommu->ecap)) {
-			clflush_cache_range(entries, VTD_PAGE_SIZE);
+		if (!ecap_coherent(info->iommu->ecap))
 			clflush_cache_range(&dir[dir_index].val, sizeof(*dir));
-		}
 	}
 
 	return &entries[index];
@@ -196,7 +213,11 @@ retry:
  * Interfaces for PASID table entry manipulation:
  */
 static void
+#ifndef __PKVM_HYP__
 intel_pasid_clear_entry(struct device *dev, u32 pasid, bool fault_ignore)
+#else
+intel_pasid_clear_entry(struct pkvm_device *dev, u32 pasid, bool fault_ignore)
+#endif
 {
 	struct pasid_entry *pe;
 
@@ -227,7 +248,11 @@ pasid_cache_invalidation_with_pasid(struct intel_iommu *iommu,
 
 static void
 devtlb_invalidation_with_pasid(struct intel_iommu *iommu,
+#ifndef __PKVM_HYP__
 			       struct device *dev, u32 pasid)
+#else
+			       struct pkvm_device *dev, u32 pasid)
+#endif
 {
 	struct device_domain_info *info;
 	u16 sid, qdep, pfsid;
@@ -257,7 +282,11 @@ devtlb_invalidation_with_pasid(struct intel_iommu *iommu,
 		qi_flush_dev_iotlb_pasid(iommu, sid, pfsid, pasid, qdep, 0, 64 - VTD_PAGE_SHIFT);
 }
 
+#ifndef __PKVM_HYP__
 void intel_pasid_tear_down_entry(struct intel_iommu *iommu, struct device *dev,
+#else
+void intel_pasid_tear_down_entry(struct intel_iommu *iommu, struct pkvm_device *dev,
+#endif
 				 u32 pasid, bool fault_ignore)
 {
 	struct pasid_entry *pte;
@@ -274,26 +303,26 @@ void intel_pasid_tear_down_entry(struct intel_iommu *iommu, struct device *dev,
 		if (WARN_ON(!info || !info->pasid_table))
 			return;
 
-		ret = pv_pasid_teardown(info, pasid);
+		ret = pkvm_pasid_teardown(info, pasid);
 		if (ret)
-			pr_err("iommu%d: pv_pasid_teardown failed(err=%d)\n",
+			pr_err("iommu%d: pkvm_pasid_teardown failed(err=%d)\n",
 			       iommu->seq_id, ret);
 
 		return;
 	}
 #endif
 
-	iommu_lock(iommu);
+	spin_lock(&iommu->lock);
 	pte = intel_pasid_get_entry(dev, pasid);
 	if (WARN_ON(IS_ERR(pte))) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return;
 	}
 
 	if (!pasid_pte_is_present(pte)) {
 		if (!pasid_pte_is_fault_disabled(pte)) {
 			WARN_ON(READ_ONCE(pte->val[0]) != 0);
-			iommu_unlock(iommu);
+			spin_unlock(&iommu->lock);
 			return;
 		}
 
@@ -304,7 +333,7 @@ void intel_pasid_tear_down_entry(struct intel_iommu *iommu, struct device *dev,
 		 * drain the PRQ for the PASID before return.
 		 */
 		pasid_clear_entry(pte);
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 #ifndef __PKVM_HYP__
 		intel_iommu_drain_pasid_prq(dev, pasid);
 #endif
@@ -319,9 +348,11 @@ void intel_pasid_tear_down_entry(struct intel_iommu *iommu, struct device *dev,
 		pgd = __pkvm_va(pasid_get_flptr(pte));
 	else if (pgtt == PASID_ENTRY_PGTT_SL_ONLY)
 		pgd = __pkvm_va(pasid_get_slptr(pte));
+	else
+		BUG();
 #endif
 	intel_pasid_clear_entry(dev, pasid, fault_ignore);
-	iommu_unlock(iommu);
+	spin_unlock(&iommu->lock);
 
 	if (!ecap_coherent(iommu->ecap))
 		clflush_cache_range(pte, sizeof(*pte));
@@ -337,9 +368,11 @@ void intel_pasid_tear_down_entry(struct intel_iommu *iommu, struct device *dev,
 #ifndef __PKVM_HYP__
 	if (!fault_ignore)
 		intel_iommu_drain_pasid_prq(dev, pasid);
-#else
-	pkvm_release_domain_cache_tag_unassign(pgd, did, pasid,
-					       dev_iommu_priv_get(dev));
+#endif
+
+#ifdef __PKVM_HYP__
+	pkvm_put_domain_cache_tag_unassign(pgd, did, pasid,
+					   dev_iommu_priv_get(dev));
 #endif
 }
 
@@ -371,7 +404,11 @@ static void pasid_flush_caches(struct intel_iommu *iommu,
  *   of VT-d spec 5.0.
  */
 static void intel_pasid_flush_present(struct intel_iommu *iommu,
+#ifndef __PKVM_HYP__
 				      struct device *dev,
+#else
+				      struct pkvm_device *dev,
+#endif
 				      u32 pasid, u16 did,
 				      struct pasid_entry *pte)
 {
@@ -428,7 +465,11 @@ static void pasid_pte_config_first_level(struct intel_iommu *iommu,
 	pasid_set_present(pte);
 }
 
+#ifndef __PKVM_HYP__
 int intel_pasid_setup_first_level(struct intel_iommu *iommu, struct device *dev,
+#else
+int intel_pasid_setup_first_level(struct intel_iommu *iommu, struct pkvm_device *dev,
+#endif
 				  phys_addr_t fsptptr, u32 pasid, u16 did,
 				  int flags)
 {
@@ -454,39 +495,40 @@ int intel_pasid_setup_first_level(struct intel_iommu *iommu, struct device *dev,
 		if (!info || !info->pasid_table)
 			return -ENODEV;
 
-		ret = pv_pasid_setup_fl(info, fsptptr, pasid, did, 0, flags);
+		ret = pkvm_pasid_setup_fl(info, fsptptr, pasid, did, 0, flags);
 		if (ret)
-			pr_err("iommu%d: pv_pasid_setup_fl failed(err=%d)\n",
-			       iommu->seq_id, ret);
+			pr_err("%s: iommu%d: pkvm_pasid_setup_fl failed(err=%d)\n",
+			       __func__, iommu->seq_id, ret);
 
 		return ret;
 	}
 #endif
 
-	iommu_lock(iommu);
+	spin_lock(&iommu->lock);
 	pte = intel_pasid_get_entry(dev, pasid);
 	if (IS_ERR(pte)) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return PTR_ERR(pte);
 	}
 
 	if (pasid_pte_is_present(pte)) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return -EBUSY;
 	}
 
 #ifdef __PKVM_HYP__
-	ret = pkvm_acquire_domain_cache_tag_assign(__pkvm_va(fsptptr), did,
-						   pasid, dev_iommu_priv_get(dev));
+	ret = pkvm_get_domain_cache_tag_assign(__pkvm_va(fsptptr), did,
+					       pasid, dev_iommu_priv_get(dev));
 	if (ret) {
 		pr_err("iommu%d: failed to get the domain for did: %d, fsptptr: %llx\n",
 		       iommu->seq_id, did, fsptptr);
+		spin_unlock(&iommu->lock);
 		return ret;
 	}
 #endif
 	pasid_pte_config_first_level(iommu, pte, fsptptr, did, flags);
 
-	iommu_unlock(iommu);
+	spin_unlock(&iommu->lock);
 
 	pasid_flush_caches(iommu, pte, pasid, did);
 
@@ -494,7 +536,11 @@ int intel_pasid_setup_first_level(struct intel_iommu *iommu, struct device *dev,
 }
 
 int intel_pasid_replace_first_level(struct intel_iommu *iommu,
+#ifndef __PKVM_HYP__
 				    struct device *dev, phys_addr_t fsptptr,
+#else
+				    struct pkvm_device *dev, phys_addr_t fsptptr,
+#endif
 				    u32 pasid, u16 did, u16 old_did,
 				    int flags)
 {
@@ -524,10 +570,10 @@ int intel_pasid_replace_first_level(struct intel_iommu *iommu,
 		if (!info || !info->pasid_table)
 			return -ENODEV;
 
-		ret = pv_pasid_setup_fl(info, fsptptr, pasid, did, old_did, flags);
+		ret = pkvm_pasid_setup_fl(info, fsptptr, pasid, did, old_did, flags);
 		if (ret)
-			pr_err("iommu%d: pv_pasid_replace_fl failed(err=%d)\n",
-			       iommu->seq_id, ret);
+			pr_err("%s: iommu%d: pkvm_pasid_setup_fl failed(err=%d)\n",
+			       __func__, iommu->seq_id, ret);
 
 		return ret;
 	}
@@ -535,34 +581,39 @@ int intel_pasid_replace_first_level(struct intel_iommu *iommu,
 
 	pasid_pte_config_first_level(iommu, &new_pte, fsptptr, did, flags);
 
-	iommu_lock(iommu);
+	spin_lock(&iommu->lock);
 	pte = intel_pasid_get_entry(dev, pasid);
 	if (IS_ERR(pte)) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return PTR_ERR(pte);
 	}
 
 	if (!pasid_pte_is_present(pte)) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return -EINVAL;
 	}
 
 
 #ifdef __PKVM_HYP__
-	if (WARN_ON(old_did != pasid_get_domain_id(pte)))
+	if (WARN_ON(old_did != pasid_get_domain_id(pte))) {
+		spin_unlock(&iommu->lock);
 		return -EINVAL;
+	}
 
 	pgtt = pasid_pte_get_pgtt(pte);
 	if (pgtt == PASID_ENTRY_PGTT_FL_ONLY)
 		old_pgd = __pkvm_va(pasid_get_flptr(pte));
 	else if (pgtt == PASID_ENTRY_PGTT_SL_ONLY)
 		old_pgd = __pkvm_va(pasid_get_slptr(pte));
+	else
+		BUG();
 
-	ret = pkvm_acquire_domain_cache_tag_assign(__pkvm_va(fsptptr), did,
-						   pasid, dev_iommu_priv_get(dev));
+	ret = pkvm_get_domain_cache_tag_assign(__pkvm_va(fsptptr), did,
+					       pasid, dev_iommu_priv_get(dev));
 	if (ret) {
 		pr_err("iommu%d: failed to get the domain for did: %d, fsptptr: %llx\n",
 		       iommu->seq_id, did, fsptptr);
+		spin_unlock(&iommu->lock);
 		return ret;
 	}
 #else
@@ -570,14 +621,14 @@ int intel_pasid_replace_first_level(struct intel_iommu *iommu,
 #endif
 
 	*pte = new_pte;
-	iommu_unlock(iommu);
+	spin_unlock(&iommu->lock);
 
 	intel_pasid_flush_present(iommu, dev, pasid, old_did, pte);
 #ifndef __PKVM_HYP__
 	intel_iommu_drain_pasid_prq(dev, pasid);
 #else
-	pkvm_release_domain_cache_tag_unassign(old_pgd, old_did,
-					       pasid, dev_iommu_priv_get(dev));
+	pkvm_put_domain_cache_tag_unassign(old_pgd, old_did,
+					   pasid, dev_iommu_priv_get(dev));
 #endif
 
 	return 0;
@@ -613,7 +664,7 @@ int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 #ifndef __PKVM_HYP__
 				   struct device *dev, u32 pasid)
 #else
-				   struct device *dev, u16 did, u32 pasid)
+				   struct pkvm_device *dev, u16 did, u32 pasid)
 #endif
 {
 	struct pasid_entry *pte;
@@ -647,37 +698,38 @@ int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 		if (!info || !info->pasid_table)
 			return -ENODEV;
 
-		ret = pv_pasid_setup_sl(info, pgd_val, domain->agaw,
-					pasid, did, 0);
+		ret = pkvm_pasid_setup_sl(info, pgd_val, pasid, did, 0);
 		if (ret)
-			pr_err("iommu%d: pv_pasid_setup_sl failed(err=%d)\n",
-			       iommu->seq_id, ret);
+			pr_err("%s: iommu%d: pkvm_pasid_setup_sl failed(err=%d)\n",
+			       __func__, iommu->seq_id, ret);
 
 		return ret;
 	}
 #endif
 
-	iommu_lock(iommu);
+	spin_lock(&iommu->lock);
 	pte = intel_pasid_get_entry(dev, pasid);
 	if (IS_ERR(pte)) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return PTR_ERR(pte);
 	}
 
 	if (pasid_pte_is_present(pte)) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return -EBUSY;
 	}
 
 #ifdef __PKVM_HYP__
-	ret = pkvm_acquire_domain_cache_tag_assign(domain->pgd, did, pasid,
-						   dev_iommu_priv_get(dev));
-	if (ret)
+	ret = pkvm_get_domain_cache_tag_assign(domain->pgd, did, pasid,
+					       dev_iommu_priv_get(dev));
+	if (ret) {
+		spin_unlock(&iommu->lock);
 		return ret;
+	}
 #endif
 	pasid_pte_config_second_level(iommu, pte, pgd_val, domain->agaw,
 				      did, domain->dirty_tracking);
-	iommu_unlock(iommu);
+	spin_unlock(&iommu->lock);
 
 	pasid_flush_caches(iommu, pte, pasid, did);
 
@@ -689,7 +741,7 @@ int intel_pasid_replace_second_level(struct intel_iommu *iommu,
 #ifndef __PKVM_HYP__
 				     struct device *dev, u16 old_did,
 #else
-				     struct device *dev, u16 did, u16 old_did,
+				     struct pkvm_device *dev, u16 did, u16 old_did,
 #endif
 				     u32 pasid)
 {
@@ -727,11 +779,10 @@ int intel_pasid_replace_second_level(struct intel_iommu *iommu,
 		if (!info || !info->pasid_table)
 			return -ENODEV;
 
-		ret = pv_pasid_setup_sl(info, pgd_val, domain->agaw,
-					pasid, did, old_did);
+		ret = pkvm_pasid_setup_sl(info, pgd_val, pasid, did, old_did);
 		if (ret)
-			pr_err("iommu%d: pv_pasid_replace_sl failed(err=%d)\n",
-			       iommu->seq_id, ret);
+			pr_err("%s: iommu%d: pkvm_pasid_setup_sl failed(err=%d)\n",
+			       __func__, iommu->seq_id, ret);
 
 		return ret;
 	}
@@ -741,34 +792,39 @@ int intel_pasid_replace_second_level(struct intel_iommu *iommu,
 				      domain->agaw, did,
 				      domain->dirty_tracking);
 
-	iommu_lock(iommu);
+	spin_lock(&iommu->lock);
 	pte = intel_pasid_get_entry(dev, pasid);
 	if (IS_ERR(pte)) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return PTR_ERR(pte);
 	}
 
 	if (!pasid_pte_is_present(pte)) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return -EINVAL;
 	}
 
 
 #ifdef __PKVM_HYP__
-	if (WARN_ON(old_did != pasid_get_domain_id(pte)))
+	if (WARN_ON(old_did != pasid_get_domain_id(pte))) {
+		spin_unlock(&iommu->lock);
 		return -EINVAL;
+	}
 
 	pgtt = pasid_pte_get_pgtt(pte);
 	if (pgtt == PASID_ENTRY_PGTT_FL_ONLY)
 		old_pgd = __pkvm_va(pasid_get_flptr(pte));
 	else if (pgtt == PASID_ENTRY_PGTT_SL_ONLY)
 		old_pgd = __pkvm_va(pasid_get_slptr(pte));
+	else
+		BUG();
 
-	ret = pkvm_acquire_domain_cache_tag_assign(domain->pgd, did, pasid,
-						   dev_iommu_priv_get(dev));
+	ret = pkvm_get_domain_cache_tag_assign(domain->pgd, did, pasid,
+					       dev_iommu_priv_get(dev));
 	if (ret) {
 		pr_err("iommu%d: failed to get the domain for did: %d, pgd: %p\n",
 		       iommu->seq_id, did, domain->pgd);
+		spin_unlock(&iommu->lock);
 		return ret;
 	}
 #else
@@ -776,14 +832,14 @@ int intel_pasid_replace_second_level(struct intel_iommu *iommu,
 #endif
 
 	*pte = new_pte;
-	iommu_unlock(iommu);
+	spin_unlock(&iommu->lock);
 
 	intel_pasid_flush_present(iommu, dev, pasid, old_did, pte);
 #ifndef __PKVM_HYP__
 	intel_iommu_drain_pasid_prq(dev, pasid);
 #else
-	pkvm_release_domain_cache_tag_unassign(old_pgd, old_did,
-					       pasid, dev_iommu_priv_get(dev));
+	pkvm_put_domain_cache_tag_unassign(old_pgd, old_did,
+					   pasid, dev_iommu_priv_get(dev));
 #endif
 
 	return 0;
@@ -882,7 +938,6 @@ int intel_pasid_setup_pass_through(struct intel_iommu *iommu,
 	u16 did = FLPT_DEFAULT_DID;
 	struct pasid_entry *pte;
 
-#ifndef __PKVM_HYP__
 	if (pkvm_enabled()) {
 		struct device_domain_info *info = dev_iommu_priv_get(dev);
 		int ret;
@@ -890,14 +945,13 @@ int intel_pasid_setup_pass_through(struct intel_iommu *iommu,
 		if (!info || !info->pasid_table)
 			return -ENODEV;
 
-		ret = pv_pasid_setup_sl(info, 0, 0, pasid, did, 0);
+		ret = pkvm_pasid_setup_sl(info, 0, pasid, did, 0);
 		if (ret)
-			pr_err("iommu%d: pv_pasid_setup_pt failed(err=%d)\n",
-			       iommu->seq_id, ret);
+			pr_err("%s: iommu%d: pkvm_pasid_setup_sl failed(err=%d)\n",
+			       __func__, iommu->seq_id, ret);
 
 		return ret;
 	}
-#endif
 
 	spin_lock(&iommu->lock);
 	pte = intel_pasid_get_entry(dev, pasid);
@@ -925,6 +979,21 @@ int intel_pasid_replace_pass_through(struct intel_iommu *iommu,
 {
 	struct pasid_entry *pte, new_pte;
 	u16 did = FLPT_DEFAULT_DID;
+
+	if (pkvm_enabled()) {
+		struct device_domain_info *info = dev_iommu_priv_get(dev);
+		int ret;
+
+		if (!info || !info->pasid_table)
+			return -ENODEV;
+
+		ret = pkvm_pasid_setup_sl(info, 0, pasid, did, old_did);
+		if (ret)
+			pr_err("%s: iommu%d: pkvm_pasid_setup_sl failed(err=%d)\n",
+			       __func__, iommu->seq_id, ret);
+
+		return ret;
+	}
 
 	pasid_pte_config_pass_through(iommu, &new_pte, did);
 
@@ -1157,11 +1226,11 @@ static void device_pasid_table_teardown(struct device *dev, u8 bus, u8 devfn)
 	u16 did;
 
 	if (pkvm_enabled()) {
-		int ret = pv_context_clear(iommu->reg_phys, bus, devfn, info);
+		int ret = pkvm_context_clear(iommu->reg_phys, bus, devfn, info);
 
 		if (ret)
-			pr_err("iommu%d: SM pv_context_clear failed(err=%d)\n",
-			       iommu->seq_id, ret);
+			pr_err("%s: iommu%d: pkvm_context_clear failed(err=%d)\n",
+			       __func__, iommu->seq_id, ret);
 		return;
 	}
 
@@ -1220,7 +1289,11 @@ static unsigned long context_get_sm_pds(struct pasid_table *table)
 }
 
 static int context_entry_set_pasid_table(struct context_entry *context,
+#ifndef __PKVM_HYP__
 					 struct device *dev)
+#else
+					 struct pkvm_device *dev)
+#endif
 {
 	struct device_domain_info *info = dev_iommu_priv_get(dev);
 	struct pasid_table *table = info->pasid_table;
@@ -1247,7 +1320,11 @@ static int context_entry_set_pasid_table(struct context_entry *context,
 	return 0;
 }
 
+#ifndef __PKVM_HYP__
 int device_pasid_table_setup(struct device *dev, u8 bus, u8 devfn)
+#else
+int device_pasid_table_setup(struct pkvm_device *dev, u8 bus, u8 devfn)
+#endif
 {
 	struct device_domain_info *info = dev_iommu_priv_get(dev);
 	struct intel_iommu *iommu = info->iommu;
@@ -1255,23 +1332,24 @@ int device_pasid_table_setup(struct device *dev, u8 bus, u8 devfn)
 
 #ifndef __PKVM_HYP__
 	if (pkvm_enabled()) {
-		int ret = pv_pasid_table_setup(iommu, info, bus, devfn);
+		int ret = pkvm_pasid_table_setup(iommu, info, bus, devfn);
 
 		if (ret)
-			pr_err("iommu%d: pv_pasid_table_setup failed(err=%d)\n",
+			pr_err("iommu%d: pkvm_pasid_table_setup failed(err=%d)\n",
 			       iommu->seq_id, ret);
 		return ret;
 	}
 #endif
-	iommu_lock(iommu);
+
+	spin_lock(&iommu->lock);
 	context = iommu_context_addr(iommu, bus, devfn, true);
 	if (!context) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return -ENOMEM;
 	}
 
 	if (context_present(context) && !context_copied(iommu, bus, devfn)) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return 0;
 	}
 
@@ -1308,7 +1386,7 @@ int device_pasid_table_setup(struct device *dev, u8 bus, u8 devfn)
 #endif /* !__PKVM_HYP__ */
 
 	context_entry_set_pasid_table(context, dev);
-	iommu_unlock(iommu);
+	spin_unlock(&iommu->lock);
 
 	/*
 	 * It's a non-present to present mapping. If hardware doesn't cache

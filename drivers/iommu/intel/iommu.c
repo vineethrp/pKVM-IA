@@ -30,12 +30,17 @@
 #include "../iommu-pages.h"
 #include "pasid.h"
 #include "perfmon.h"
+
 #ifdef __PKVM_HYP__
 #include "pkvm/memory.h"
 #undef phys_to_virt
 #define phys_to_virt __pkvm_va
 #undef virt_to_phys
 #define virt_to_phys __pkvm_pa
+#undef spin_lock
+#define spin_lock pkvm_spin_lock
+#undef spin_unlock
+#define spin_unlock pkvm_spin_unlock
 #endif
 
 #define ROOT_SIZE		VTD_PAGE_SIZE
@@ -401,7 +406,7 @@ struct context_entry *iommu_context_addr(struct intel_iommu *iommu, u8 bus,
 		context = iommu_alloc_pages_node_sz(iommu->node, GFP_ATOMIC,
 						    SZ_4K);
 #else
-		context = pkvm_iommu_ts_page(iommu);
+		context = pkvm_iommu_donation_page(iommu);
 #endif
 		if (!context)
 			return NULL;
@@ -558,16 +563,7 @@ out:
 
 	return iommu;
 }
-#endif /*!__PKVM_HYP__*/
 
-static void domain_flush_cache(struct dmar_domain *domain,
-			       void *addr, int size)
-{
-	if (!domain->iommu_coherency)
-		clflush_cache_range(addr, size);
-}
-
-#ifndef __PKVM_HYP__
 static void free_context_table(struct intel_iommu *iommu)
 {
 	struct context_entry *context;
@@ -769,9 +765,7 @@ static struct dma_pte *pfn_to_dma_pte(struct dmar_domain *domain,
 			if (!tmp_page)
 				return NULL;
 #else
-			struct pkvm_page_range page_range = pop_pkvm_memcache(&domain->mc,
-									      hyp_phys_to_virt);
-			tmp_page = hyp_phys_to_virt(page_range.addr);
+			tmp_page = pop_pkvm_memcache_page(&domain->mc, pkvm_phys_to_virt);
 			if (!tmp_page)
 				return NULL;
 			memset(tmp_page, 0, VTD_PAGE_SIZE);
@@ -792,8 +786,8 @@ static struct dma_pte *pfn_to_dma_pte(struct dmar_domain *domain,
 #ifndef __PKVM_HYP__
 				iommu_free_pages(tmp_page);
 #else
-				push_pkvm_memcache(&domain->mc, tmp_page,
-						   PAGE_SIZE, hyp_virt_to_phys);
+				push_pkvm_memcache_page(&domain->mc, tmp_page,
+							pkvm_virt_to_phys);
 #endif
 			}
 			else
@@ -914,8 +908,8 @@ static void dma_pte_free_level(struct dmar_domain *domain, int level,
 #ifndef __PKVM_HYP__
 			iommu_free_pages(level_pte);
 #else
-			push_pkvm_memcache(&domain->mc, (phys_addr_t *)level_pte,
-					   PAGE_SIZE, hyp_virt_to_phys);
+			push_pkvm_memcache_page(&domain->mc, (phys_addr_t *)level_pte,
+						pkvm_virt_to_phys);
 #endif
 		}
 next:
@@ -1062,7 +1056,7 @@ static void dma_unuse_pte(struct dmar_domain *domain,
 			pte++;
 		} while (!first_pte_in_page(pte));
 	}
-	push_pkvm_memcache(&domain->mc, pte_addr, VTD_PAGE_SIZE, hyp_virt_to_phys);
+	push_pkvm_memcache_page(&domain->mc, pte_addr, pkvm_virt_to_phys);
 }
 
 /*
@@ -1117,8 +1111,7 @@ next:
    the page tables, and may have cached the intermediate levels. The
    pages can only be freed after the IOTLB flush has been done. */
 void domain_unmap(struct dmar_domain *domain, unsigned long start_pfn,
-			 unsigned long last_pfn,
-			 struct iommu_pages_list *freelist)
+		  unsigned long last_pfn, struct iommu_pages_list *freelist)
 {
 	bool leaf_ptes_only;
 
@@ -1139,10 +1132,10 @@ void domain_unmap(struct dmar_domain *domain, unsigned long start_pfn,
 #else
 	/*
 	 * Regardless of the DMA mode used by host, we perform iotlb flush on
-	 * unmap. Unmapped pages may be donated to a pvm and pvm could use
-	 * it to store sensitve data. Until a flush happens, stale entries in
-	 * cache could enable a device to read those pages which might contain
-	 * sensitive data. So perform flush unconditionally.
+	 * unmap. Unmapped pages may be donated to a pVM or to the hypervisor.
+	 * Until a flush happens, stale entries in cache could enable a device
+	 * to access those pages, breaking pKVM security guarantees. So perform
+	 * flush immediately.
 	 */
 	/* Set IH=1(Invalidation Hint) if only leaf ptes were updated. */
 	cache_tag_flush_range(domain, start_pfn << VTD_PAGE_SHIFT,
@@ -1231,7 +1224,6 @@ void iommu_flush_write_buffer(struct intel_iommu *iommu)
 #else
 	/* pKVM will not be enabled if WRBF is required */
 	return;
-
 #endif
 }
 
@@ -1664,16 +1656,16 @@ int domain_context_mapping_one(struct dmar_domain *domain,
 		bus, PCI_SLOT(devfn), PCI_FUNC(devfn));
 
 	if (pkvm_enabled()) {
-		ret = pv_context_mapping(iommu, info, bus, devfn,
-					 virt_to_phys(domain->pgd),
-					 did, domain->agaw);
+		ret = pkvm_context_mapping(iommu, info, bus, devfn,
+					   virt_to_phys(domain->pgd), did);
 		if (ret)
-			pr_err("iommu%d: pv_context_mapping failed(err=%d)\n",
-			       iommu->seq_id, ret);
+			pr_err("%s: iommu%d: pkvm_context_mapping failed(err=%d)\n",
+			       __func__, iommu->seq_id, ret);
 		return ret;
 	}
 #endif
-	iommu_lock(iommu);
+
+	spin_lock(&iommu->lock);
 	ret = -ENOMEM;
 	context = iommu_context_addr(iommu, bus, devfn, 1);
 	if (!context)
@@ -1685,13 +1677,15 @@ int domain_context_mapping_one(struct dmar_domain *domain,
 
 #ifndef __PKVM_HYP__
 	copied_context_tear_down(iommu, context, bus, devfn);
-#else
-	ret = pkvm_acquire_domain_cache_tag_assign(pgd, did,
-						   IOMMU_NO_PASID, info);
+#endif
+
+#ifdef __PKVM_HYP__
+	ret = pkvm_get_domain_cache_tag_assign(pgd, did,
+					       IOMMU_NO_PASID, info);
 	if (ret) {
 		pr_err("iommu%d: failed to get the domain for pgd: %p\n",
 		       iommu->seq_id, pgd);
-		return ret;
+		goto out_unlock;
 	}
 #endif
 	context_clear_entry(context);
@@ -1713,7 +1707,7 @@ int domain_context_mapping_one(struct dmar_domain *domain,
 	ret = 0;
 
 out_unlock:
-	iommu_unlock(iommu);
+	spin_unlock(&iommu->lock);
 
 	return ret;
 }
@@ -1816,8 +1810,8 @@ static void switch_to_super_page(struct dmar_domain *domain,
 }
 
 int domain_map(struct dmar_domain *domain, unsigned long iov_pfn,
-		 unsigned long phys_pfn, unsigned long nr_pages, int prot,
-		 gfp_t gfp)
+	       unsigned long phys_pfn, unsigned long nr_pages, int prot,
+	       gfp_t gfp)
 {
 	struct dma_pte *first_pte = NULL, *pte = NULL;
 	unsigned int largepage_lvl = 0;
@@ -1825,6 +1819,10 @@ int domain_map(struct dmar_domain *domain, unsigned long iov_pfn,
 	phys_addr_t pteval;
 	u64 attr;
 	int ret = 0;
+#ifdef __PKVM_HYP__
+	unsigned long flush_iov_pfn = iov_pfn;
+	unsigned long flush_nr_pages = nr_pages;
+#endif
 
 	if (unlikely(!domain_pfn_supported(domain, iov_pfn + nr_pages - 1)))
 		return -EINVAL;
@@ -1837,7 +1835,9 @@ int domain_map(struct dmar_domain *domain, unsigned long iov_pfn,
 		pr_err_ratelimited("Read-only mapping is disallowed on the domain which serves as the parent in a nested configuration, due to HW errata (ERRATA_772415_SPR17)\n");
 		return -EINVAL;
 	}
-#else
+#endif
+
+#ifdef __PKVM_HYP__
 	ret = pkvm_host_use_dma(phys_pfn << VTD_PAGE_SHIFT, nr_pages * VTD_PAGE_SIZE);
 	if (ret)
 		return ret;
@@ -1897,17 +1897,19 @@ int domain_map(struct dmar_domain *domain, unsigned long iov_pfn,
 		 */
 		tmp = 0ULL;
 		if (!try_cmpxchg64_local(&pte->val, &tmp, pteval)) {
-			static int dumps = 5;
 #ifdef __PKVM_HYP__
 			if (tmp == pteval)
 				pkvm_host_unuse_dma(dma_pte_addr(pte), VTD_PAGE_SIZE);
 #endif
+#ifndef __PKVM_HYP__
+			static int dumps = 5;
 			pr_crit("ERROR: DMA PTE for vPFN 0x%lx already set (to %llx not %llx)\n",
 				iov_pfn, tmp, (unsigned long long)pteval);
 			if (dumps) {
 				dumps--;
 				debug_dma_dump_mappings(NULL);
 			}
+#endif
 			WARN_ON(1);
 		}
 
@@ -1939,10 +1941,14 @@ int domain_map(struct dmar_domain *domain, unsigned long iov_pfn,
 
 out:
 #ifdef __PKVM_HYP__
-	if (domain->iotlb_sync_map)
-		cache_tag_flush_range_np(domain, iov_pfn << VTD_PAGE_SHIFT,
-					 (iov_pfn + nr_pages - 1) << VTD_PAGE_SHIFT);
-	if (ret && nr_pages)
+	if (domain->iotlb_sync_map) {
+		flush_nr_pages -= nr_pages;
+		cache_tag_flush_range_np(domain, flush_iov_pfn << VTD_PAGE_SHIFT,
+					 (flush_iov_pfn + flush_nr_pages - 1) << VTD_PAGE_SHIFT);
+	}
+
+	/* Unpin pages that are not mapped */
+	if (nr_pages)
 		pkvm_host_unuse_dma(phys_pfn << VTD_PAGE_SHIFT, nr_pages * VTD_PAGE_SIZE);
 #endif
 	return ret;
@@ -2001,19 +2007,19 @@ void domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
 
 #ifndef __PKVM_HYP__
 	if (pkvm_enabled()) {
-		int ret = pv_context_clear(iommu->reg_phys, bus, devfn, info);
+		int ret = pkvm_context_clear(iommu->reg_phys, bus, devfn, info);
 
 		if (ret)
-			pr_err("iommu%d: LM pv_context_clear failed(err=%d)\n",
-			       iommu->seq_id, ret);
+			pr_err("%s: iommu%d: pkvm_context_clear failed(err=%d)\n",
+			       __func__, iommu->seq_id, ret);
 		return;
 	}
 #endif
 
-	iommu_lock(iommu);
+	spin_lock(&iommu->lock);
 	context = iommu_context_addr(iommu, bus, devfn, 0);
 	if (!context) {
-		iommu_unlock(iommu);
+		spin_unlock(&iommu->lock);
 		return;
 	}
 
@@ -2021,27 +2027,27 @@ void domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
 	if (sm) {
 		pasid_dir = __pkvm_va(context->lo & VTD_PAGE_MASK);
 		pasid_dir_sz = get_pasid_dir_size(context);
-		if (pasid_table_has_present_entries(pasid_dir, pasid_dir_sz)) {
-			iommu_unlock(iommu);
+		if (WARN_ON(pasid_table_has_present_entries(pasid_dir, pasid_dir_sz))) {
+			spin_unlock(&iommu->lock);
 			return;
 		}
 	} else {
-		pgd = __pkvm_va(context_get_address_root(context));
+		pgd = __pkvm_va(context->lo & VTD_PAGE_MASK);
 	}
 #endif
 
 	did = context_domain_id(context);
 	context_clear_entry(context);
 	__iommu_flush_cache(iommu, context, sizeof(*context));
-	iommu_unlock(iommu);
+	spin_unlock(&iommu->lock);
 	intel_context_flush_no_pasid(info, context, did);
 
 #ifdef __PKVM_HYP__
 	if (sm)
 		pasid_free_table(pasid_dir, pasid_dir_sz);
 	else
-		pkvm_release_domain_cache_tag_unassign(pgd, did,
-						       IOMMU_NO_PASID, info);
+		pkvm_put_domain_cache_tag_unassign(pgd, did,
+						   IOMMU_NO_PASID, info);
 #endif
 }
 
@@ -3696,12 +3702,14 @@ static struct dmar_domain *paging_domain_alloc(struct device *dev, bool first_st
 	}
 
 	if (pkvm_enabled()) {
-		int ret = pv_alloc_domain(info, domain);
+		int ret = pkvm_alloc_domain(info, domain);
 
 		if (ret) {
+			pr_err("pkvm_alloc_domain failed [pgd=%p] (err=%d)\n",
+				domain->pgd, ret);
 			iommu_free_pages(domain->pgd);
 			kfree(domain);
-			domain = ERR_PTR(ret);
+			return ERR_PTR(ret);
 		}
 	} else {
 		domain_flush_cache(domain, domain->pgd, PAGE_SIZE);
@@ -3815,10 +3823,11 @@ static void intel_iommu_domain_free(struct iommu_domain *domain)
 			IOMMU_PAGES_LIST_INIT(freelist);
 
 		if (pkvm_enabled()) {
-			int ret = pv_free_domain(dmar_domain);
+			int ret = pkvm_free_domain(dmar_domain);
+
 			if (ret)
-				pr_warn("pv_free_domain failed for domain[pgd: %p!\n",
-					dmar_domain->pgd);
+				pr_err("pkvm_free_domain failed [pgd=%p] (err=%d)\n",
+					dmar_domain->pgd, ret);
 		} else {
 			domain_unmap(dmar_domain, 0, DOMAIN_MAX_PFN(dmar_domain->gaw),
 				     &freelist);
@@ -3982,11 +3991,11 @@ static int intel_iommu_map(struct iommu_domain *domain,
 	size = aligned_nrpages(hpa, size);
 
 	if (pkvm_enabled())
-		return pv_domain_mapping(dmar_domain, iova >> VTD_PAGE_SHIFT,
-					 hpa >> VTD_PAGE_SHIFT, size, prot, gfp);
+		return pkvm_domain_map(dmar_domain, iova >> VTD_PAGE_SHIFT,
+				       hpa >> VTD_PAGE_SHIFT, size, prot, gfp);
 
 	return domain_map(dmar_domain, iova >> VTD_PAGE_SHIFT,
-				hpa >> VTD_PAGE_SHIFT, size, prot, gfp);
+			  hpa >> VTD_PAGE_SHIFT, size, prot, gfp);
 }
 
 static int intel_iommu_map_pages(struct iommu_domain *domain,
@@ -4032,7 +4041,7 @@ static size_t intel_iommu_unmap(struct iommu_domain *domain,
 	last_pfn = (iova + size - 1) >> VTD_PAGE_SHIFT;
 
 	if (pkvm_enabled()) {
-		int ret = pv_domain_unmapping(dmar_domain, start_pfn, last_pfn);
+		int ret = pkvm_domain_unmap(dmar_domain, start_pfn, last_pfn);
 
 		if (ret)
 			pr_err("%s: domain unmap IOVA[start: %lx, end: %lx] failed (err=%d)\n",
@@ -4078,8 +4087,8 @@ static void intel_iommu_tlb_sync(struct iommu_domain *domain,
 	 */
 	if (!pkvm_enabled())
 		cache_tag_flush_range(to_dmar_domain(domain), gather->start,
-					  gather->end,
-					  iommu_pages_list_empty(&gather->freelist));
+				      gather->end,
+				      iommu_pages_list_empty(&gather->freelist));
 	iommu_put_pages_list(&gather->freelist);
 }
 
@@ -4769,11 +4778,20 @@ static int context_setup_pass_through(struct device *dev, u8 bus, u8 devfn)
 	struct context_entry *context;
 
 	if (pkvm_enabled()) {
-		int ret = pv_context_mapping(iommu, info, bus, devfn, 0,
-					     FLPT_DEFAULT_DID, iommu->agaw);
-		if (ret)
-			pr_err("iommu%d: pv_setup_pass_thtough failed(err=%d)\n",
-			       iommu->seq_id, ret);
+		int ret = pkvm_context_mapping(iommu, info, bus, devfn, 0, FLPT_DEFAULT_DID);
+		if (ret) {
+			pr_err("%s: iommu%d: pkvm_context_mapping failed(err=%d)\n",
+			       __func__, iommu->seq_id, ret);
+		} else if (!dev_is_real_dma_subdevice(dev)) {
+			/*
+			 * pKVM uses second stage translation for passthrough
+			 * and hence need to enable ATS in pci config space.
+			 * NOTE: pKVM supports ATS only if the device is in
+			 * SATC and pKVM validates this before enabling it
+			 * during context/pasid table updates.
+			 */
+			iommu_enable_pci_ats(info);
+		}
 		return ret;
 	}
 

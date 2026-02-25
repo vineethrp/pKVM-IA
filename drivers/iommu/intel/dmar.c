@@ -1302,8 +1302,8 @@ static int qi_check_fault(struct intel_iommu *iommu, int index, int wait_index)
 	int head, tail;
 #ifndef __PKVM_HYP__
 	struct device *dev;
-#endif
 	u64 iqe_err, ite_sid;
+#endif
 	struct q_inval *qi = iommu->qi;
 	int shift = qi_shift(iommu);
 
@@ -1348,12 +1348,14 @@ static int qi_check_fault(struct intel_iommu *iommu, int index, int wait_index)
 		tail = dmar_readl(iommu, DMAR_IQT_REG);
 		tail = ((tail >> shift) - 1 + QI_LENGTH) % QI_LENGTH;
 
+#ifndef __PKVM_HYP__
 		/*
 		 * SID field is valid only when the ITE field is Set in FSTS_REG
 		 * see Intel VT-d spec r4.1, section 11.4.9.9
 		 */
 		iqe_err = dmar_readq(iommu, DMAR_IQER_REG);
 		ite_sid = DMAR_IQER_REG_ITESID(iqe_err);
+#endif
 
 		dmar_writel(iommu, DMAR_FSTS_REG, DMA_FSTS_ITE);
 		pr_info("Invalidation Time-out Error (ITE) cleared\n");
@@ -1391,18 +1393,17 @@ static int qi_check_fault(struct intel_iommu *iommu, int index, int wait_index)
 	return 0;
 }
 
-#ifndef __PKVM_HYP__
-#define qi_lock(qi) raw_spin_lock(&(qi)->q_lock)
-#define qi_unlock(qi) raw_spin_unlock(&(qi)->q_lock)
-#define qi_lock_irqsave(qi, flags) raw_spin_lock_irqsave(&(qi)->q_lock, flags)
-#define qi_unlock_irqrestore(qi, flags) raw_spin_unlock_irqrestore(&(qi)->q_lock, flags)
-#else
-#define qi_lock(qi) pkvm_spin_lock(&(qi)->q_lock)
-#define qi_unlock(qi) pkvm_spin_unlock(&(qi)->q_lock)
-#define qi_lock_irqsave(qi, flags) qi_lock(qi)
-#define qi_unlock_irqrestore(qi, flags) qi_unlock(qi)
+#ifdef __PKVM_HYP__
+#undef raw_spin_lock
+#define raw_spin_lock(lock) pkvm_spin_lock(lock)
+#undef raw_spin_unlock
+#define raw_spin_unlock(lock) pkvm_spin_unlock(lock)
+#undef raw_spin_lock_irqsave
+#define raw_spin_lock_irqsave(lock, flags) pkvm_spin_lock(lock)
+#undef raw_spin_unlock_irqrestore
+#define raw_spin_unlock_irqrestore(lock, flags) pkvm_spin_unlock(lock)
 
-#define trace_qi_submit(a1, a2, a3, a4, a5)
+#define trace_qi_submit(...)
 #undef virt_to_phys
 #define virt_to_phys(ptr) __pkvm_pa(ptr)
 #endif
@@ -1438,6 +1439,9 @@ int qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
 		return 0;
 
 #ifndef __PKVM_HYP__
+	if (WARN_ON_ONCE(pkvm_enabled()))
+		return -EOPNOTSUPP;
+
 	type = desc->qw0 & GENMASK_ULL(3, 0);
 
 	if ((type == QI_IOTLB_TYPE || type == QI_EIOTLB_TYPE) &&
@@ -1456,16 +1460,16 @@ int qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
 restart:
 	rc = 0;
 
-	qi_lock_irqsave(qi, flags);
+	raw_spin_lock_irqsave(&qi->q_lock, flags);
 	/*
 	 * Check if we have enough empty slots in the queue to submit,
 	 * the calculation is based on:
 	 * # of desc + 1 wait desc + 1 space between head and tail
 	 */
 	while (qi->free_cnt < count + 2) {
-		qi_unlock_irqrestore(qi, flags);
+		raw_spin_unlock_irqrestore(&qi->q_lock, flags);
 		cpu_relax();
-		qi_lock_irqsave(qi, flags);
+		raw_spin_lock_irqsave(&qi->q_lock, flags);
 	}
 
 	index = qi->free_head;
@@ -1513,9 +1517,9 @@ restart:
 		if (rc)
 			break;
 
-		qi_unlock(qi);
+		raw_spin_unlock(&qi->q_lock);
 		cpu_relax();
-		qi_lock(qi);
+		raw_spin_lock(&qi->q_lock);
 	}
 
 	/*
@@ -1530,7 +1534,7 @@ restart:
 		qi->desc_status[(index + i) % QI_LENGTH] = QI_FREE;
 
 	reclaim_free_desc(qi);
-	qi_unlock_irqrestore(qi, flags);
+	raw_spin_unlock_irqrestore(&qi->q_lock, flags);
 
 	if (rc == -EAGAIN)
 		goto restart;
@@ -1561,11 +1565,11 @@ void qi_global_iec(struct intel_iommu *iommu)
 
 #ifndef __PKVM_HYP__
 	if (pkvm_enabled()) {
-		int ret = pv_iec_flush(iommu, true, 0, 0);
+		int ret = pkvm_iec_flush(iommu, true, 0, 0);
 
 		if (ret)
-			pr_warn("iommu%d: pv_iec_flush failed!\n",
-				iommu->seq_id);
+			pr_warn("%s: iommu%d: pkvm_iec_flush failed!\n",
+				__func__, iommu->seq_id);
 		return;
 	}
 #endif
@@ -1584,8 +1588,14 @@ int qi_flush_iec(struct intel_iommu *iommu, int index, int mask)
 	struct qi_desc desc;
 
 #ifndef __PKVM_HYP__
-	if (pkvm_enabled())
-		return pv_iec_flush(iommu, false, index, mask);
+	if (pkvm_enabled()) {
+		int ret = pkvm_iec_flush(iommu, false, index, mask);
+
+		if (ret)
+			pr_warn("%s: iommu%d: pkvm_iec_flush failed!\n",
+				__func__, iommu->seq_id);
+		return ret;
+	}
 #endif
 
 	desc.qw0 = QI_IEC_IIDEX(index) | QI_IEC_TYPE | QI_IEC_IM(mask)

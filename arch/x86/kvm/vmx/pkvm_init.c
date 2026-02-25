@@ -1383,15 +1383,7 @@ out:
 	 */
 	pkvm_firmware_rmem_clear();
 
-	/*
-	 * Try enabling iommu on initialization failure to let the
-	 * system boot normally without pKVM. Try iommu init even if
-	 * we tried it while deprivileged and failed there. Host driver
-	 * uninitializes iommu on any failure, so retrying with cpus
-	 * reprivileged should be okay and may succeed if the previous
-	 * failure was due to pKVM.
-	 */
-	pkvm_host_init_iommu();
+	/* TODO: Try re-initialize IOMMU */
 
 	/*
 	 * As the reserved memory at the pkvm_mem_base will not be

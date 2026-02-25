@@ -62,7 +62,7 @@
  * pKVM hypervisor does unmap in two pass:
  * 1. Walk the page table, unpresent the leaf PTE for all mappings in
  *    the range to be unmapped and flush caches(iotlb/devtlb).
- * 2. Walk the page table again, determine the phyisical pages in the
+ * 2. Walk the page table again, determine the physical pages in the
  *    unmapped region and unpin them.
  *
  * This is to guarantee that the host would not be able to donate the
@@ -865,9 +865,6 @@ struct intel_iommu {
 
 	struct iommu_pmu *pmu;
 };
-
-#define iommu_lock(iommu)	spin_lock(&(iommu)->lock)
-#define iommu_unlock(iommu)	spin_unlock(&(iommu)->lock)
 #else
 struct intel_iommu {
 	void __iomem	*reg; /* Pointer to hardware regs, virtual addr */
@@ -891,12 +888,22 @@ struct intel_iommu {
 	 * page is passed in by hypercalls that construct the
 	 * translation structures.
 	 */
-	void		*ts_page;
+	void		*donation_page;
 	pkvm_spinlock_t lock;
 };
 
-#define iommu_lock(iommu)	pkvm_spin_lock(&(iommu)->lock)
-#define iommu_unlock(iommu)	pkvm_spin_unlock(&(iommu)->lock)
+/*
+ * Get the page donated by host for constructing
+ * translation structures(context/pasid).
+ * Requires the caller to hold iommu->lock
+ */
+static inline void *pkvm_iommu_donation_page(struct intel_iommu *iommu)
+{
+	void *donation_page = iommu->donation_page;
+
+	iommu->donation_page = NULL;
+	return donation_page;
+}
 #endif /* !__PKVM_HYP__ */
 
 #ifndef __PKVM_HYP__
@@ -957,6 +964,13 @@ static inline void __iommu_flush_cache(
 	struct intel_iommu *iommu, void *addr, int size)
 {
 	if (!ecap_coherent(iommu->ecap))
+		clflush_cache_range(addr, size);
+}
+
+static inline void domain_flush_cache(struct dmar_domain *domain,
+			       void *addr, int size)
+{
+	if (!domain->iommu_coherency)
 		clflush_cache_range(addr, size);
 }
 
@@ -1119,14 +1133,6 @@ static inline int width_to_agaw(int width)
 	return DIV_ROUND_UP(width - 30, LEVEL_STRIDE);
 }
 
-int domain_map(struct dmar_domain *domain, unsigned long iov_pfn,
-		 unsigned long phys_pfn, unsigned long nr_pages, int prot,
-		 gfp_t gfp);
-
-void domain_unmap(struct dmar_domain *domain, unsigned long start_pfn,
-			 unsigned long last_pfn,
-			 struct iommu_pages_list *freelist);
-
 static inline unsigned int level_to_offset_bits(int level)
 {
 	return (level - 1) * LEVEL_STRIDE;
@@ -1203,11 +1209,6 @@ static inline int context_domain_id(struct context_entry *c)
 	return((c->hi >> 8) & 0xffff);
 }
 
-static inline unsigned long context_get_address_root(struct context_entry *ce)
-{
-	return READ_ONCE(ce->lo) & VTD_PAGE_MASK;
-}
-
 static inline void context_clear_entry(struct context_entry *context)
 {
 	context->lo = 0;
@@ -1223,6 +1224,13 @@ int domain_context_mapping_one(struct dmar_domain *domain,
 			       u16 did,
 #endif
 			       u8 bus, u8 devfn);
+
+int domain_map(struct dmar_domain *domain, unsigned long iov_pfn,
+	       unsigned long phys_pfn, unsigned long nr_pages,
+	       int prot, gfp_t gfp);
+
+void domain_unmap(struct dmar_domain *domain, unsigned long start_pfn,
+		  unsigned long last_pfn, struct iommu_pages_list *freelist);
 
 #ifndef __PKVM_HYP__
 #ifdef CONFIG_INTEL_IOMMU
@@ -1247,7 +1255,10 @@ clear_context_copied(struct intel_iommu *iommu, u8 bus, u8 devfn)
 }
 #endif /* CONFIG_INTEL_IOMMU */
 #else
-#define context_copied(iommu, bus, devfn) false
+static inline bool context_copied(struct intel_iommu *iommu, u8 bus, u8 devfn)
+{
+	return false;
+}
 #endif /* ! __PKVM_HYP__ */
 
 /*
@@ -1486,9 +1497,6 @@ struct cache_tag {
 	struct list_head node;
 	enum cache_tag_type type;
 	struct intel_iommu *iommu;
-	u16 domain_id;
-	ioasid_t pasid;
-	unsigned int users;
 #ifndef __PKVM_HYP__
 	/*
 	 * The @dev field represents the location of the cache. For IOTLB, it
@@ -1504,20 +1512,26 @@ struct cache_tag {
 	u8 ats_qdep;
 	unsigned int index;
 #endif
+	u16 domain_id;
+	ioasid_t pasid;
+	unsigned int users;
 };
 
+#ifndef __PKVM_HYP__
 int cache_tag_assign(struct dmar_domain *domain, u16 did, struct device *dev,
 		     ioasid_t pasid, enum cache_tag_type type);
 int cache_tag_assign_domain(struct dmar_domain *domain,
-#ifdef __PKVM_HYP__
-			    u16 did,
-#endif
 			    struct device *dev, ioasid_t pasid);
 void cache_tag_unassign_domain(struct dmar_domain *domain,
-#ifdef __PKVM_HYP__
-			       u16 did,
-#endif
 			       struct device *dev, ioasid_t pasid);
+#else
+int cache_tag_assign(struct dmar_domain *domain, u16 did, struct pkvm_device *dev,
+		     ioasid_t pasid, enum cache_tag_type type);
+int cache_tag_assign_domain(struct dmar_domain *domain,
+			    u16 did, struct pkvm_device *dev, ioasid_t pasid);
+void cache_tag_unassign_domain(struct dmar_domain *domain,
+			       u16 did, struct pkvm_device *dev, ioasid_t pasid);
+#endif
 void cache_tag_flush_range(struct dmar_domain *domain, unsigned long start,
 			   unsigned long end, int ih);
 void cache_tag_flush_all(struct dmar_domain *domain);

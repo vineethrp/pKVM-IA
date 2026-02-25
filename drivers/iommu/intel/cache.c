@@ -19,22 +19,28 @@
 #include "pasid.h"
 #include "trace.h"
 
+#ifdef __PKVM_HYP__
+#undef spin_lock_irqsave
+#define spin_lock_irqsave(lock, flags) pkvm_spin_lock(lock)
+#undef spin_unlock_irqrestore
+#define spin_unlock_irqrestore(lock, flags) pkvm_spin_unlock(lock)
 
-#ifndef __PKVM_HYP__
-#define cache_lock_irqsave(lock, flags) spin_lock_irqsave(lock, flags)
-#define cache_unlock_irqrestore(lock, flags) spin_unlock_irqrestore(lock, flags)
-#else
-#define cache_lock_irqsave(lock, flags) pkvm_spin_lock(lock)
-#define cache_unlock_irqrestore(lock, flags) pkvm_spin_unlock(lock)
-#define trace_cache_tag_assign(a1)
-#define trace_cache_tag_unassign(a1)
-#define trace_cache_tag_flush_range(a1, a2, a3, a4, a5, a6)
-#define trace_cache_tag_flush_range_np(a1, a2, a3, a4, a5, a6)
+#define trace_cache_tag_assign(...)
+#define trace_cache_tag_unassign(...)
+#define trace_cache_tag_flush_range(...)
+#define trace_cache_tag_flush_range_np(...)
+
+#undef dev_iommu_priv_get
+#define dev_iommu_priv_get pkvm_dev_iommu_priv_get
 #endif
 
 /* Check if an existing cache tag can be reused for a new association. */
 static bool cache_tage_match(struct cache_tag *tag, u16 domain_id,
+#ifndef __PKVM_HYP__
 			     struct intel_iommu *iommu, struct device *dev,
+#else
+			     struct intel_iommu *iommu, struct pkvm_device *dev,
+#endif
 			     ioasid_t pasid, enum cache_tag_type type)
 {
 	if (tag->type != type)
@@ -60,7 +66,11 @@ static bool cache_tage_match(struct cache_tag *tag, u16 domain_id,
 }
 
 /* Assign a cache tag with specified type to domain. */
+#ifndef __PKVM_HYP__
 int cache_tag_assign(struct dmar_domain *domain, u16 did, struct device *dev,
+#else
+int cache_tag_assign(struct dmar_domain *domain, u16 did, struct pkvm_device *dev,
+#endif
 		     ioasid_t pasid, enum cache_tag_type type)
 {
 	struct device_domain_info *info = dev_iommu_priv_get(dev);
@@ -98,12 +108,12 @@ int cache_tag_assign(struct dmar_domain *domain, u16 did, struct device *dev,
 		tag->dev = iommu->iommu.dev;
 #endif
 
-	cache_lock_irqsave(&domain->cache_lock, flags);
+	spin_lock_irqsave(&domain->cache_lock, flags);
 	prev = &domain->cache_tags;
 	list_for_each_entry(temp, &domain->cache_tags, node) {
 		if (cache_tage_match(temp, did, iommu, dev, pasid, type)) {
 			temp->users++;
-			cache_unlock_irqrestore(&domain->cache_lock, flags);
+			spin_unlock_irqrestore(&domain->cache_lock, flags);
 #ifndef __PKVM_HYP__
 			kfree(tag);
 #else
@@ -121,7 +131,7 @@ int cache_tag_assign(struct dmar_domain *domain, u16 did, struct device *dev,
 	 */
 	list_add(&tag->node, prev);
 
-	cache_unlock_irqrestore(&domain->cache_lock, flags);
+	spin_unlock_irqrestore(&domain->cache_lock, flags);
 	trace_cache_tag_assign(tag);
 
 	return 0;
@@ -129,7 +139,11 @@ int cache_tag_assign(struct dmar_domain *domain, u16 did, struct device *dev,
 
 /* Unassign a cache tag with specified type from domain. */
 static void cache_tag_unassign(struct dmar_domain *domain, u16 did,
+#ifndef __PKVM_HYP__
 			       struct device *dev, ioasid_t pasid,
+#else
+			       struct pkvm_device *dev, ioasid_t pasid,
+#endif
 			       enum cache_tag_type type)
 {
 	struct device_domain_info *info = dev_iommu_priv_get(dev);
@@ -139,7 +153,7 @@ static void cache_tag_unassign(struct dmar_domain *domain, u16 did,
 	unsigned long flags;
 #endif
 
-	cache_lock_irqsave(&domain->cache_lock, flags);
+	spin_lock_irqsave(&domain->cache_lock, flags);
 	list_for_each_entry(tag, &domain->cache_tags, node) {
 		if (cache_tage_match(tag, did, iommu, dev, pasid, type)) {
 			trace_cache_tag_unassign(tag);
@@ -154,7 +168,7 @@ static void cache_tag_unassign(struct dmar_domain *domain, u16 did,
 			break;
 		}
 	}
-	cache_unlock_irqrestore(&domain->cache_lock, flags);
+	spin_unlock_irqrestore(&domain->cache_lock, flags);
 }
 
 #ifndef __PKVM_HYP__
@@ -178,8 +192,13 @@ out_unlock:
 }
 #endif
 
+#ifndef __PKVM_HYP__
 static int __cache_tag_assign_domain(struct dmar_domain *domain, u16 did,
 				     struct device *dev, ioasid_t pasid)
+#else
+int cache_tag_assign_domain(struct dmar_domain *domain, u16 did,
+			    struct pkvm_device *dev, ioasid_t pasid)
+#endif
 {
 	struct device_domain_info *info = dev_iommu_priv_get(dev);
 	int ret;
@@ -201,8 +220,13 @@ static int __cache_tag_assign_domain(struct dmar_domain *domain, u16 did,
 	return ret;
 }
 
+#ifndef __PKVM_HYP__
 static void __cache_tag_unassign_domain(struct dmar_domain *domain, u16 did,
 					struct device *dev, ioasid_t pasid)
+#else
+void cache_tag_unassign_domain(struct dmar_domain *domain, u16 did,
+			       struct pkvm_device *dev, ioasid_t pasid)
+#endif
 {
 	struct device_domain_info *info = dev_iommu_priv_get(dev);
 
@@ -259,7 +283,6 @@ static u16 domain_get_id_for_dev(struct dmar_domain *domain, struct device *dev)
 
 	return domain_id_iommu(domain, iommu);
 }
-#endif /* !__PKVM_HYP__ */
 
 /*
  * Assign cache tags to a domain when it's associated with a device's
@@ -270,12 +293,8 @@ static u16 domain_get_id_for_dev(struct dmar_domain *domain, struct device *dev)
  * code is returned indicating the reason for the failure.
  */
 int cache_tag_assign_domain(struct dmar_domain *domain,
-#ifdef __PKVM_HYP__
-			    u16 did,
-#endif
 			    struct device *dev, ioasid_t pasid)
 {
-#ifndef __PKVM_HYP__
 	u16 did = domain_get_id_for_dev(domain, dev);
 	int ret;
 
@@ -291,9 +310,6 @@ int cache_tag_assign_domain(struct dmar_domain *domain,
 		__cache_tag_unassign_domain(domain, did, dev, pasid);
 
 	return ret;
-#else
-	return __cache_tag_assign_domain(domain, did, dev, pasid);
-#endif
 }
 
 /*
@@ -304,12 +320,8 @@ int cache_tag_assign_domain(struct dmar_domain *domain,
  * assign interface.
  */
 void cache_tag_unassign_domain(struct dmar_domain *domain,
-#ifdef __PKVM_HYP__
-			       u16 did,
-#endif
 			       struct device *dev, ioasid_t pasid)
 {
-#ifndef __PKVM_HYP__
 	u16 did = domain_get_id_for_dev(domain, dev);
 
 	if (pkvm_enabled())
@@ -318,10 +330,8 @@ void cache_tag_unassign_domain(struct dmar_domain *domain,
 	__cache_tag_unassign_domain(domain, did, dev, pasid);
 	if (domain->domain.type == IOMMU_DOMAIN_NESTED)
 		__cache_tag_unassign_parent_domain(domain->s2_domain, did, dev, pasid);
-#else
-	__cache_tag_unassign_domain(domain, did, dev, pasid);
-#endif
 }
+#endif /* !__PKVM_HYP__ */
 
 static unsigned long calculate_psi_aligned_address(unsigned long start,
 						   unsigned long end,
@@ -531,7 +541,7 @@ void cache_tag_flush_range(struct dmar_domain *domain, unsigned long start,
 		addr = calculate_psi_aligned_address(start, end, &pages, &mask);
 	}
 
-	cache_lock_irqsave(&domain->cache_lock, flags);
+	spin_lock_irqsave(&domain->cache_lock, flags);
 	list_for_each_entry(tag, &domain->cache_tags, node) {
 		if (iommu && iommu != tag->iommu)
 			qi_batch_flush_descs(iommu, domain->qi_batch);
@@ -561,7 +571,7 @@ void cache_tag_flush_range(struct dmar_domain *domain, unsigned long start,
 		trace_cache_tag_flush_range(tag, start, end, addr, pages, mask);
 	}
 	qi_batch_flush_descs(iommu, domain->qi_batch);
-	cache_unlock_irqrestore(&domain->cache_lock, flags);
+	spin_unlock_irqrestore(&domain->cache_lock, flags);
 }
 
 #ifndef __PKVM_HYP__
@@ -598,7 +608,7 @@ void cache_tag_flush_range_np(struct dmar_domain *domain, unsigned long start,
 
 	addr = calculate_psi_aligned_address(start, end, &pages, &mask);
 
-	cache_lock_irqsave(&domain->cache_lock, flags);
+	spin_lock_irqsave(&domain->cache_lock, flags);
 	list_for_each_entry(tag, &domain->cache_tags, node) {
 		if (iommu && iommu != tag->iommu)
 			qi_batch_flush_descs(iommu, domain->qi_batch);
@@ -617,5 +627,5 @@ void cache_tag_flush_range_np(struct dmar_domain *domain, unsigned long start,
 		trace_cache_tag_flush_range_np(tag, start, end, addr, pages, mask);
 	}
 	qi_batch_flush_descs(iommu, domain->qi_batch);
-	cache_unlock_irqrestore(&domain->cache_lock, flags);
+	spin_unlock_irqrestore(&domain->cache_lock, flags);
 }

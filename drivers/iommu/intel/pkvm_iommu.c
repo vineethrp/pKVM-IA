@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright © 2026 Google.
- *
  */
 
 #define pr_fmt(fmt)     "DMAR: pkvm: " fmt
@@ -106,243 +105,232 @@ out:
 
 int __init pkvm_host_init_iommu(void)
 {
-	return intel_iommu_init();
+	int ret = intel_iommu_init();
+
+	if (!ret)
+		pr_info("IOMMU initialized!\n");
+	else
+		pr_err("IOMMU initialize failed(err=%d)\n", ret);
+
+	return ret;
 }
 
-int pv_iec_flush(struct intel_iommu *iommu, bool global, int index, int mask)
+int pkvm_iec_flush(struct intel_iommu *iommu, bool global, int index, int mask)
 {
-	union pkvm_hc_data d = { 0 };
-	struct iommu_hc_data *data = (struct iommu_hc_data *)&d;
-
-	data->iec_flush.phys = iommu->reg_phys;
-	data->iec_flush.global = global;
-	data->iec_flush.index = index;
-	data->iec_flush.mask = mask;
-	data->hc_num = iec_flush;
-	return pkvm_hypercall_inout(iommu_hypercall, &d, &d);
+	return pkvm_hypercall(iommu_iec_flush, iommu->reg_phys, index, mask, global);
 }
 
-int pv_context_clear(u64 phys, u8 bus, u8 devfn, struct device_domain_info *info)
+int pkvm_context_clear(u64 phys, u8 bus, u8 devfn, struct device_domain_info *info)
 {
 	union pkvm_hc_data d = { 0 };
-	struct iommu_hc_data *data = (struct iommu_hc_data *)&d;
+	struct clear_ce_data *data = &d.iommu_clear_ce.data;
 
-	data->clear_ce.phys = phys;
-	data->clear_ce.bus = bus;
-	data->clear_ce.devfn = devfn;
-	data->clear_ce.ats_qdep = info ? info->ats_qdep : 0;
-	data->clear_ce.ats_supported = info ? info->ats_supported : 0;
-	data->clear_ce.ats_enabled = info ? info->ats_enabled : 0;
-	data->hc_num = clear_ce;
+	data->phys = phys;
+	data->bus = bus;
+	data->devfn = devfn;
+	data->ats_qdep = info->ats_qdep;
+	data->ats_supported = info->ats_supported;
+	data->ats_enabled = info->ats_enabled;
 
-	return pkvm_hypercall_inout(iommu_hypercall, &d, &d);
+	return pkvm_hypercall_in(iommu_clear_ce, &d);
 }
 
-int pv_context_mapping(struct intel_iommu *iommu, struct device_domain_info *info,
-		       u8 bus, u8 devfn, u64 pgd_gpa, u16 did, u8 agaw)
+int pkvm_context_mapping(struct intel_iommu *iommu, struct device_domain_info *info,
+			 u8 bus, u8 devfn, u64 pgd_gpa, u16 did)
 {
 	union pkvm_hc_data d = { 0 };
-	struct iommu_hc_data *data = (struct iommu_hc_data *)&d;
+	struct set_lm_ce_data *data = &d.iommu_set_lm_ce.in;
 	int ret;
 
-	data->set_lm_ce.phys = iommu->reg_phys;
-	data->set_lm_ce.pgd_gpa = pgd_gpa;
-	data->set_lm_ce.did = did;
-	data->set_lm_ce.bus = bus;
-	data->set_lm_ce.devfn = devfn;
-	data->set_lm_ce.agaw = agaw;
-	data->set_lm_ce.ats_qdep = info->ats_qdep;
-	data->set_lm_ce.ats_supported = info->ats_supported;
-	data->set_lm_ce.ats_enabled = info->ats_enabled;
-	data->hc_num = set_lm_ce;
+	data->phys = iommu->reg_phys;
+	data->pgd_gpa = pgd_gpa;
+	data->did = did;
+	data->bus = bus;
+	data->devfn = devfn;
+	data->ats_qdep = info->ats_qdep;
+	data->ats_supported = info->ats_supported;
+	data->ats_enabled = info->ats_enabled;
 
-	iommu_lock(iommu);
-	ret = pkvm_hypercall_inout(iommu_hypercall, &d, &d);
+	spin_lock(&iommu->lock);
+	ret = pkvm_hypercall_inout(iommu_set_lm_ce, &d, &d);
 	if (ret == -ENOMEM) {
-		void *ts_page = iommu_alloc_pages_node_sz(iommu->node, GFP_ATOMIC, SZ_4K);
+		void *donation_page = iommu_alloc_pages_node_sz(iommu->node, GFP_ATOMIC, SZ_4K);
 
-		if (!ts_page) {
+		if (!donation_page) {
 			pr_err("iommu%d: failed to allocate context page\n", iommu->seq_id);
-			iommu_unlock(iommu);
+			spin_unlock(&iommu->lock);
 			return -ENOMEM;
 		}
-		data->set_lm_ce.ts_page_gpa = virt_to_phys(ts_page);
-		ret = pkvm_hypercall_inout(iommu_hypercall, &d, &d);
+		data->donation_page_gpa = virt_to_phys(donation_page);
+		ret = pkvm_hypercall_inout(iommu_set_lm_ce, &d, &d);
 
 		/*
-		 * If the hypervisor used ts_page_gpa, it will be set to 0.
+		 * If the hypervisor used donation_gpa, it will be set to 0.
 		 * Free the page if hypervisor didn't use the page.
 		 */
-		if (data->set_lm_ce.ts_page_gpa)
-			iommu_free_pages(phys_to_virt(data->set_lm_ce.ts_page_gpa));
+		if (data->donation_page_gpa)
+			iommu_free_pages(phys_to_virt(data->donation_page_gpa));
 	}
-	iommu_unlock(iommu);
+	spin_unlock(&iommu->lock);
 
 	return ret;
 }
 
-int pv_pasid_table_setup(struct intel_iommu *iommu, struct device_domain_info *info,
-			 u8 bus, u8 devfn)
+int pkvm_pasid_table_setup(struct intel_iommu *iommu, struct device_domain_info *info,
+			   u8 bus, u8 devfn)
 {
 	union pkvm_hc_data d = { 0 };
-	struct iommu_hc_data *data = (struct iommu_hc_data *)&d;
+	struct set_sm_ce_data *data = &d.iommu_set_sm_ce.in;
 	int ret;
 
-	data->set_sm_ce.phys = iommu->reg_phys;
-	data->set_sm_ce.pasid_table_gpa = virt_to_phys(info->pasid_table->table);
-	data->set_sm_ce.max_pasid = info->pasid_table->max_pasid;
-	data->set_sm_ce.bus = bus;
-	data->set_sm_ce.devfn = devfn;
-	data->set_sm_ce.ats_supported = info->ats_supported;
-	data->set_sm_ce.ats_enabled = info->ats_enabled;
-	data->set_sm_ce.pasid_supported = info->pasid_supported;
-	data->set_sm_ce.pasid_enabled = info->pasid_enabled;
-	data->set_sm_ce.ats_qdep = info->ats_qdep;
-	data->hc_num = set_sm_ce;
+	data->phys = iommu->reg_phys;
+	data->pasid_table_gpa = virt_to_phys(info->pasid_table->table);
+	data->max_pasid = info->pasid_table->max_pasid;
+	data->bus = bus;
+	data->devfn = devfn;
+	data->pasid_supported = info->pasid_supported;
+	data->pasid_enabled = info->pasid_enabled;
+	data->ats_supported = info->ats_supported;
+	data->ats_enabled = info->ats_enabled;
+	data->ats_qdep = info->ats_qdep;
 
-	iommu_lock(iommu);
-	ret = pkvm_hypercall_inout(iommu_hypercall, &d, &d);
+	spin_lock(&iommu->lock);
+	ret = pkvm_hypercall_inout(iommu_set_sm_ce, &d, &d);
 	if (ret == -ENOMEM) {
-		void *context = iommu_alloc_pages_node_sz(iommu->node, GFP_ATOMIC, SZ_4K);
+		void *donation_page = iommu_alloc_pages_node_sz(iommu->node,
+								GFP_ATOMIC, SZ_4K);
 
-		if (!context) {
+		if (!donation_page) {
 			pr_err("iommu%d: failed to allocate context page\n", iommu->seq_id);
-			iommu_unlock(iommu);
+			spin_unlock(&iommu->lock);
 			return -ENOMEM;
 		}
-		data->set_sm_ce.ts_page_gpa = virt_to_phys(context);
-		ret = pkvm_hypercall_inout(iommu_hypercall, &d, &d);
+		data->donation_page_gpa = virt_to_phys(donation_page);
+		ret = pkvm_hypercall_inout(iommu_set_sm_ce, &d, &d);
 
-		if (data->set_sm_ce.ts_page_gpa)
-			iommu_free_pages(phys_to_virt(data->set_sm_ce.ts_page_gpa));
+		if (data->donation_page_gpa)
+			iommu_free_pages(phys_to_virt(data->donation_page_gpa));
 	}
-	iommu_unlock(iommu);
+	spin_unlock(&iommu->lock);
 
 	return ret;
 }
 
-int pv_pasid_setup_fl(struct device_domain_info *info, phys_addr_t fsptptr,
+int pkvm_pasid_setup_fl(struct device_domain_info *info, phys_addr_t fsptptr,
 		      u32 pasid, u16 did, u16 old_did, int flags)
 {
 	union pkvm_hc_data d = { 0 };
-	struct iommu_hc_data *data = (struct iommu_hc_data *)&d;
+	struct pasid_setup_fl_data *data = &d.iommu_pasid_setup_fl.in;
 	struct intel_iommu *iommu = info->iommu;
 	int ret;
 
-	data->pasid_setup_fl.phys = iommu->reg_phys;
-	data->pasid_setup_fl.fsptptr_gpa = fsptptr;
-	data->pasid_setup_fl.pasid_dir_gpa = virt_to_phys(info->pasid_table->table);
-	data->pasid_setup_fl.pasid = pasid;
-	data->pasid_setup_fl.flags = flags;
-	data->pasid_setup_fl.did = did;
-	data->pasid_setup_fl.old_did = old_did;
-	data->pasid_setup_fl.bus = info->bus;
-	data->pasid_setup_fl.devfn = info->devfn;
-	data->pasid_setup_fl.ats_qdep = info->ats_qdep;
-	data->pasid_setup_fl.ats_enabled = info->ats_enabled;
-	data->pasid_setup_fl.ats_supported = info->ats_supported;
-	data->hc_num = pasid_setup_fl;
+	data->phys = iommu->reg_phys;
+	data->fsptptr_gpa = fsptptr;
+	data->pasid = pasid;
+	data->flags = flags;
+	data->did = did;
+	data->old_did = old_did;
+	data->bus = info->bus;
+	data->devfn = info->devfn;
+	data->ats_qdep = info->ats_qdep;
+	data->ats_enabled = info->ats_enabled;
+	data->ats_supported = info->ats_supported;
 
-	iommu_lock(iommu);
-	ret = pkvm_hypercall_inout(iommu_hypercall, &d, &d);
+	spin_lock(&iommu->lock);
+	ret = pkvm_hypercall_inout(iommu_pasid_setup_fl, &d, &d);
 	if (ret == -ENOMEM) {
-		void *ts_page = iommu_alloc_pages_node_sz(iommu->node, GFP_ATOMIC, SZ_4K);
+		void *donation_page = iommu_alloc_pages_node_sz(iommu->node, GFP_ATOMIC, SZ_4K);
 
-		if (!ts_page) {
+		if (!donation_page) {
 			pr_err("iommu%d: failed to allocate pasid table page\n", iommu->seq_id);
-			iommu_unlock(iommu);
+			spin_unlock(&iommu->lock);
 			return -ENOMEM;
 		}
-		data->pasid_setup_fl.ts_page_gpa = virt_to_phys(ts_page);
-		ret = pkvm_hypercall_inout(iommu_hypercall, &d, &d);
+		data->donation_page_gpa = virt_to_phys(donation_page);
+		ret = pkvm_hypercall_inout(iommu_pasid_setup_fl, &d, &d);
 
-		if (data->pasid_setup_fl.ts_page_gpa)
-			iommu_free_pages(phys_to_virt(data->pasid_setup_fl.ts_page_gpa));
+		if (data->donation_page_gpa)
+			iommu_free_pages(phys_to_virt(data->donation_page_gpa));
 	}
-	iommu_unlock(iommu);
+	spin_unlock(&iommu->lock);
 
 	return ret;
 }
 
-int pv_pasid_setup_sl(struct device_domain_info *info, phys_addr_t ssptptr,
-		      u8 agaw, u32 pasid, u16 did, u16 old_did)
+int pkvm_pasid_setup_sl(struct device_domain_info *info, phys_addr_t ssptptr,
+			u32 pasid, u16 did, u16 old_did)
 {
 	union pkvm_hc_data d = { 0 };
-	struct iommu_hc_data *data = (struct iommu_hc_data *)&d;
+	struct pasid_setup_sl_data *data = &d.iommu_pasid_setup_sl.in;
 	struct intel_iommu *iommu = info->iommu;
 	int ret;
 
-	data->pasid_setup_sl.phys = iommu->reg_phys;
-	data->pasid_setup_sl.ssptptr_gpa = ssptptr;
-	data->pasid_setup_sl.pasid_dir_gpa = virt_to_phys(info->pasid_table->table);
-	data->pasid_setup_sl.pasid = pasid;
-	data->pasid_setup_sl.did = did;
-	data->pasid_setup_sl.old_did = old_did;
-	data->pasid_setup_sl.bus = info->bus;
-	data->pasid_setup_sl.devfn = info->devfn;
-	data->pasid_setup_sl.agaw = agaw;
-	data->pasid_setup_sl.ats_qdep = info->ats_qdep;
-	data->pasid_setup_sl.ats_supported = info->ats_supported;
-	data->pasid_setup_sl.ats_enabled = info->ats_enabled;
-	data->hc_num = pasid_setup_sl;
+	data->phys = iommu->reg_phys;
+	data->ssptptr_gpa = ssptptr;
+	data->pasid = pasid;
+	data->did = did;
+	data->old_did = old_did;
+	data->bus = info->bus;
+	data->devfn = info->devfn;
+	data->ats_qdep = info->ats_qdep;
+	data->ats_supported = info->ats_supported;
+	data->ats_enabled = info->ats_enabled;
 
-	iommu_lock(iommu);
-	ret = pkvm_hypercall_inout(iommu_hypercall, &d, &d);
+	spin_lock(&iommu->lock);
+	ret = pkvm_hypercall_inout(iommu_pasid_setup_sl, &d, &d);
 	if (ret == -ENOMEM) {
-		void *ts_page = iommu_alloc_pages_node_sz(iommu->node, GFP_ATOMIC, SZ_4K);
+		void *donation_page = iommu_alloc_pages_node_sz(iommu->node, GFP_ATOMIC, SZ_4K);
 
-		if (!ts_page) {
+		if (!donation_page) {
 			pr_err("iommu%d: failed to allocate pasid table page\n", iommu->seq_id);
-			iommu_unlock(iommu);
+			spin_unlock(&iommu->lock);
 			return -ENOMEM;
 		}
-		data->pasid_setup_sl.ts_page_gpa = virt_to_phys(ts_page);
-		ret = pkvm_hypercall_inout(iommu_hypercall, &d, &d);
+		data->donation_page_gpa = virt_to_phys(donation_page);
+		ret = pkvm_hypercall_inout(iommu_pasid_setup_sl, &d, &d);
 
-		if (data->pasid_setup_sl.ts_page_gpa)
-			iommu_free_pages(phys_to_virt(data->pasid_setup_sl.ts_page_gpa));
+		if (data->donation_page_gpa)
+			iommu_free_pages(phys_to_virt(data->donation_page_gpa));
 	}
-	iommu_unlock(iommu);
+	spin_unlock(&iommu->lock);
 
 	return ret;
 }
 
-int pv_pasid_teardown(struct device_domain_info *info, u32 pasid)
+int pkvm_pasid_teardown(struct device_domain_info *info, u32 pasid)
 {
 	union pkvm_hc_data d = { 0 };
-	struct iommu_hc_data *data = (struct iommu_hc_data *)&d;
+	struct pasid_teardown_data *data = &d.iommu_pasid_teardown.data;
 	struct intel_iommu *iommu = info->iommu;
 
-	data->pasid_teardown.phys = iommu->reg_phys;
-	data->pasid_teardown.pasid = pasid;
-	data->pasid_teardown.bus = info->bus;
-	data->pasid_teardown.devfn = info->devfn;
-	data->pasid_teardown.ats_qdep = info->ats_qdep;
-	data->pasid_teardown.ats_enabled = info->ats_enabled;
-	data->pasid_teardown.ats_supported = info->ats_supported;
-	data->hc_num = pasid_teardown;
+	data->phys = iommu->reg_phys;
+	data->pasid = pasid;
+	data->bus = info->bus;
+	data->devfn = info->devfn;
+	data->ats_qdep = info->ats_qdep;
+	data->ats_enabled = info->ats_enabled;
+	data->ats_supported = info->ats_supported;
 
-	return pkvm_hypercall_inout(iommu_hypercall, &d, &d);
+	return pkvm_hypercall_in(iommu_pasid_teardown, &d);
 }
 
-int pv_alloc_domain(struct device_domain_info *info, struct dmar_domain *domain)
+int pkvm_alloc_domain(struct device_domain_info *info, struct dmar_domain *domain)
 {
 	union pkvm_hc_data d = { 0 };
-	struct iommu_hc_data *data = (struct iommu_hc_data *)&d;
+	struct alloc_domain_data *data = &d.iommu_alloc_domain.data;
 	int ret;
 
-	data->alloc_domain.phys = info->iommu->reg_phys;
-	data->alloc_domain.bdf = PCI_DEVID(info->bus, info->devfn);
-	data->alloc_domain.use_first_level = domain->use_first_level;
-	data->alloc_domain.pgd_gpa = virt_to_phys(domain->pgd);
-	data->alloc_domain.gaw = domain->gaw;
-	data->alloc_domain.agaw = domain->agaw;
-	data->alloc_domain.max_addr = domain->max_addr;
-	data->alloc_domain.iommu_coherency = domain->iommu_coherency;
-	data->alloc_domain.iommu_superpage = domain->iommu_superpage;
-	data->hc_num = alloc_domain;
+	data->phys = info->iommu->reg_phys;
+	data->bdf = PCI_DEVID(info->bus, info->devfn);
+	data->use_first_level = domain->use_first_level;
+	data->pgd_gpa = virt_to_phys(domain->pgd);
+	data->gaw = domain->gaw;
+	data->agaw = domain->agaw;
+	data->max_addr = domain->max_addr;
+	data->iommu_coherency = domain->iommu_coherency;
+	data->iommu_superpage = domain->iommu_superpage;
 
-	ret = pkvm_hypercall_inout(iommu_hypercall, &d, &d);
+	ret = pkvm_hypercall_in(iommu_alloc_domain, &d);
 	if (ret)
 		pr_err("%s: pkvm failed to alloc domain for device[%x:%x.%x] (err=%d)\n", __func__,
 		       info->bus, PCI_SLOT(info->devfn), PCI_FUNC(info->devfn), ret);
@@ -360,50 +348,40 @@ static void *host_va(phys_addr_t phys)
 	return __va(phys);
 }
 
-static int fill_domain_memcache(struct pkvm_memcache *mc, unsigned long nr_pages,
-				int nid, gfp_t gfp)
+struct mc_alloc_arg {
+	int nid;
+	gfp_t gfp;
+};
+
+static void *host_mc_alloc_page(void *alloc_arg)
 {
-	while (mc->count < nr_pages) {
-		phys_addr_t *p = iommu_alloc_pages_node_sz(nid, gfp, SZ_4K);
+	struct mc_alloc_arg *arg = (struct mc_alloc_arg *)alloc_arg;
 
-		if (!p)
-			return -ENOMEM;
-
-		push_pkvm_memcache(mc, p, PAGE_SIZE, host_pa);
-	}
-
-	return 0;
+	return iommu_alloc_pages_node_sz(arg->nid, arg->gfp, SZ_4K);
 }
 
 static void free_domain_memcache(struct pkvm_memcache *mc)
 {
-	while (mc->count) {
-		struct pkvm_page_range page_range;
-
-		page_range = pop_pkvm_memcache(mc, host_va);
-		iommu_free_pages(__va(page_range.addr));
-	}
+	while (mc->count)
+		iommu_free_pages(pop_pkvm_memcache_page(mc, host_va));
 }
 
-int pv_free_domain(struct dmar_domain *domain)
+int pkvm_free_domain(struct dmar_domain *domain)
 {
-	union pkvm_hc_data d = { 0 };
-	struct iommu_hc_data *data = (struct iommu_hc_data *)&d;
+	union pkvm_hc_data out;
 	int ret;
 
-	data->free_domain.pgd_gpa = virt_to_phys(domain->pgd);
-	data->hc_num = free_domain;
-	ret = pkvm_hypercall_inout(iommu_hypercall, &d, &d);
-	free_domain_memcache(&data->free_domain.mc);
+	ret = pkvm_hypercall_out(iommu_free_domain, &out, virt_to_phys(domain->pgd));
+	free_domain_memcache(&out.iommu_free_domain.memcache);
 	return ret;
 }
 
-int pv_domain_mapping(struct dmar_domain *domain, unsigned long iov_pfn,
-		      unsigned long phys_pfn, unsigned long nr_pages,
-		      int prot, int gfp)
+int pkvm_domain_map(struct dmar_domain *domain, unsigned long iov_pfn,
+		    unsigned long phys_pfn, unsigned long nr_pages,
+		    int prot, int gfp)
 {
 	union pkvm_hc_data d = { 0 };
-	struct domain_map_data *data = (struct domain_map_data *)&d;
+	struct domain_map_data *data = &d.iommu_domain_map.in;
 	int ret;
 
 	data->pgd_gpa = virt_to_phys(domain->pgd),
@@ -414,16 +392,19 @@ int pv_domain_mapping(struct dmar_domain *domain, unsigned long iov_pfn,
 
 	ret = pkvm_hypercall_inout(iommu_domain_map, &d, &d);
 	if (ret == -ENOMEM) {
-		ret = fill_domain_memcache(&data->mc,
-					   __pkvm_pgtable_max_pages(nr_pages),
-					  domain->nid, gfp);
-		if (ret) {
-			pr_err("%s: failed to allocate memcache pages(err=%d)\n",
-			       __func__, ret);
-			return ret;
-		}
-		ret = pkvm_hypercall_inout(iommu_domain_map, &d, &d);
+		struct mc_alloc_arg arg = {
+			.nid = domain->nid,
+			.gfp = gfp,
+		};
+
+		ret = topup_pkvm_memcache(&data->mc, __pkvm_pgtable_max_pages(nr_pages),
+					  host_mc_alloc_page, host_pa, &arg);
+		if (!ret)
+			ret = pkvm_hypercall_inout(iommu_domain_map, &d, &d);
+		else
+			pr_err("%s: memcache topup failed(err=%d)\n", __func__, ret);
 	}
+
 	if (ret) {
 		pr_err("%s: domain map[iov_pfn: %lx, pfn: %lx, nr_pages: %lu] failed (err=%d)\n",
 		       __func__, iov_pfn, phys_pfn, nr_pages, ret);
@@ -434,18 +415,18 @@ int pv_domain_mapping(struct dmar_domain *domain, unsigned long iov_pfn,
 		 */
 		free_domain_memcache(&data->mc);
 	}
+
 	domain->has_mappings = true;
 	return ret;
 }
 
-int pv_domain_unmapping(struct dmar_domain *domain, unsigned long start_pfn,
-			unsigned long last_pfn)
+int pkvm_domain_unmap(struct dmar_domain *domain, unsigned long start_pfn, unsigned long last_pfn)
 {
 	int ret = pkvm_hypercall(iommu_domain_unmap, virt_to_phys(domain->pgd),
 				 start_pfn, last_pfn);
 
 	if (ret)
-		pr_err("%s: domain unmap[start_pfn: %lx, last_pfn: %lx failed (err=%d)\n",
+		pr_err("%s: domain unmap[start_pfn: %lx, last_pfn: %lx] failed (err=%d)\n",
 		       __func__, start_pfn, last_pfn, ret);
 	return ret;
 }

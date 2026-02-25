@@ -10,34 +10,31 @@
 #include "pkvm/memory.h"
 #include "pkvm/pkvm.h"
 #include "pkvm/debug.h"
-#include "iommu_hc.h"
 #include "../iommu.h"
 #include "../pasid.h"
-#include "iommu_domain.h"
 
-int pkvm_iommu_iec_flush(struct iec_flush_data *data)
+int pkvm_iommu_iec_flush(u64 phys, int index, int mask, bool global)
 {
-	struct intel_iommu *iommu = iommu_from_phys(data->phys);
+	struct intel_iommu *iommu = iommu_from_phys(phys);
 
 	if (!iommu)
 		return -EINVAL;
 
 	BUG_ON(!iommu->qi);
 
-	if (data->global) {
+	if (global) {
 		qi_global_iec(iommu);
 		return 0;
 	}
 
-	return qi_flush_iec(iommu, data->index, data->mask);
-
+	return qi_flush_iec(iommu, index, mask);
 }
 
 int pkvm_iommu_clear_ce(struct clear_ce_data *data)
 {
 	struct intel_iommu *iommu = iommu_from_phys(data->phys);
 	u16 bdf = PCI_DEVID(data->bus, data->devfn);
-	struct device_domain_info info;
+	struct device_domain_info info = { 0 };
 
 	if (!iommu)
 		return -EINVAL;
@@ -72,28 +69,30 @@ int pkvm_iommu_clear_ce(struct clear_ce_data *data)
 	return 0;
 }
 
-static int accept_ts_page_donation(struct intel_iommu *iommu, u64 *ts_page_gpa)
+static int accept_page_donation(struct intel_iommu *iommu, u64 *donation_page_gpa)
 {
-	iommu_lock(iommu);
-	if (*ts_page_gpa && !iommu->ts_page) {
-		u64 ts_page = pkvm_host_gpa_to_phys(*ts_page_gpa);
-		int ret = pkvm_host_donate_hyp_share_ro(ts_page, VTD_PAGE_SIZE, true);
+	pkvm_spin_lock(&iommu->lock);
+	if (*donation_page_gpa && !iommu->donation_page) {
+		u64 donation_page_pa = pkvm_host_gpa_to_phys(*donation_page_gpa);
+
+		int ret = pkvm_host_donate_hyp_share_ro(donation_page_pa,
+							VTD_PAGE_SIZE, true);
 
 		if (ret) {
-			iommu_unlock(iommu);
-			pkvm_err("iommu%d: failed to write protect translation structure page(err=%d)!\n",
+			pkvm_spin_unlock(&iommu->lock);
+			pkvm_err("iommu%d: failed to write protect donated page(err=%d)!\n",
 				 iommu->seq_id, ret);
 			return ret;
 		}
-		iommu->ts_page = __pkvm_va(ts_page);
-		*ts_page_gpa = 0ULL;
+		iommu->donation_page = __pkvm_va(donation_page_pa);
+		*donation_page_gpa = 0ULL;
 	}
-	iommu_unlock(iommu);
+	pkvm_spin_unlock(&iommu->lock);
 
 	return 0;
 }
 
-int pkvm_iommu_set_lm_ce(struct set_lm_ce_data *data)
+static int iommu_set_lm_ce(struct set_lm_ce_data *data)
 {
 	struct intel_iommu *iommu = iommu_from_phys(data->phys);
 	u16 bdf = PCI_DEVID(data->bus, data->devfn);
@@ -120,7 +119,6 @@ int pkvm_iommu_set_lm_ce(struct set_lm_ce_data *data)
 	info.ats_qdep = data->ats_qdep;
 	info.ats_supported = data->ats_supported;
 	info.ats_enabled = data->ats_enabled;
-
 	if (data->did == FLPT_DEFAULT_DID) {
 		/*
 		 * Passthrough will break pkvm security guarantees as
@@ -132,14 +130,11 @@ int pkvm_iommu_set_lm_ce(struct set_lm_ce_data *data)
 		domain.pgd = __pkvm_va(pkvm_host_ept_root());
 		domain.agaw = level_to_agaw(pkvm_host_ept_level());
 	} else {
-		if (data->agaw != iommu->agaw)
-			return -EINVAL;
-
 		domain.pgd = pkvm_host_gpa_to_virt(data->pgd_gpa);
-		domain.agaw = data->agaw;
+		domain.agaw = iommu->agaw;
 	}
 
-	ret = accept_ts_page_donation(iommu, &data->ts_page_gpa);
+	ret = accept_page_donation(iommu, &data->donation_page_gpa);
 	if (ret)
 		return ret;
 
@@ -147,6 +142,14 @@ int pkvm_iommu_set_lm_ce(struct set_lm_ce_data *data)
 		 data->bus, data->devfn, data->did, domain.pgd, domain.agaw);
 	return domain_context_mapping_one(&domain, iommu, &info, data->did,
 					  data->bus, data->devfn);
+}
+
+int pkvm_iommu_set_lm_ce(struct set_lm_ce_data *in, struct set_lm_ce_data *out)
+{
+	int ret = iommu_set_lm_ce(in);
+
+	*out = *in;
+	return ret;
 }
 
 /*
@@ -159,14 +162,13 @@ int pkvm_iommu_set_lm_ce(struct set_lm_ce_data *data)
  */
 #define pasid_dir_size(max_pasid) ((max_pasid) >> (15 - PAGE_SHIFT))
 
-int pkvm_iommu_set_sm_ce(struct set_sm_ce_data *data)
+static int iommu_set_sm_ce(struct set_sm_ce_data *data)
 {
 	struct intel_iommu *iommu = iommu_from_phys(data->phys);
 	u16 bdf = PCI_DEVID(data->bus, data->devfn);
 	struct device_domain_info info = { 0 };
-	struct dev_iommu dev_iommu = { 0 };
 	struct pasid_table table = { 0 };
-	struct device dev = { 0 };
+	struct pkvm_device dev = { .info = &info };
 	int ret;
 
 	if (!iommu)
@@ -191,14 +193,11 @@ int pkvm_iommu_set_sm_ce(struct set_sm_ce_data *data)
 	info.pasid_table = &table;
 	info.iommu = iommu;
 
-	dev_iommu.priv = (void *)&info;
-	dev.iommu = &dev_iommu;
-
-	ret = accept_ts_page_donation(iommu, &data->ts_page_gpa);
+	ret = accept_page_donation(iommu, &data->donation_page_gpa);
 	if (ret)
 		return ret;
 
-	ret = pkvm_host_donate_hyp_share_ro(data->pasid_table_gpa,
+	ret = pkvm_host_donate_hyp_share_ro(pkvm_host_gpa_to_phys(data->pasid_table_gpa),
 					    pasid_dir_size(data->max_pasid), true);
 	if (ret) {
 		pkvm_err("failed to write protect pasid dir for dev[%x:%x](err=%d)\n",
@@ -206,13 +205,23 @@ int pkvm_iommu_set_sm_ce(struct set_sm_ce_data *data)
 		return ret;
 	}
 
+	__iommu_flush_cache(iommu, table.table, pasid_dir_size(data->max_pasid));
+
 	pkvm_dbg("%s: dev[%x:%x], ats_qdep: %d, pasid_table_gpa: %llx\n", __func__,
 		 data->bus, data->devfn, info.ats_qdep, data->pasid_table_gpa);
 	ret = device_pasid_table_setup(&dev, data->bus, data->devfn);
 
 	if (ret)
-		pkvm_hyp_donate_host(data->pasid_table_gpa,
+		pkvm_hyp_donate_host(pkvm_host_gpa_to_phys(data->pasid_table_gpa),
 				     pasid_dir_size(data->max_pasid), false);
+	return ret;
+}
+
+int pkvm_iommu_set_sm_ce(struct set_sm_ce_data *in, struct set_sm_ce_data *out)
+{
+	int ret = iommu_set_sm_ce(in);
+
+	*out = *in;
 	return ret;
 }
 
@@ -234,14 +243,13 @@ static int __get_pasid_table(struct intel_iommu *iommu, u8 bus, u8 devfn, struct
 	return 0;
 }
 
-int pkvm_iommu_pasid_setup_fl(struct pasid_setup_fl_data *data)
+static int iommu_pasid_setup_fl(struct pasid_setup_fl_data *data)
 {
 	struct intel_iommu *iommu = iommu_from_phys(data->phys);
 	u16 bdf = PCI_DEVID(data->bus, data->devfn);
 	struct device_domain_info info = { 0 };
-	struct dev_iommu dev_iommu = { 0 };
+	struct pkvm_device dev = { .info = &info };
 	struct pasid_table table = { 0 };
-	struct device dev = { 0 };
 	u64 fsptptr;
 	int ret;
 
@@ -262,13 +270,6 @@ int pkvm_iommu_pasid_setup_fl(struct pasid_setup_fl_data *data)
 	if (ret)
 		return ret;
 
-	if (__pkvm_pa(table.table) != pkvm_host_gpa_to_phys(data->pasid_dir_gpa)) {
-		pkvm_err("%s: pasid dir address mismatch(%lx != %llx)\n",
-			 __func__, __pkvm_pa(table.table),
-			 pkvm_host_gpa_to_phys(data->pasid_dir_gpa));
-		table.table = pkvm_host_gpa_to_virt(data->pasid_dir_gpa);
-	}
-
 	fsptptr = pkvm_host_gpa_to_phys(data->fsptptr_gpa);
 	info.bus = data->bus;
 	info.devfn = data->devfn;
@@ -277,10 +278,8 @@ int pkvm_iommu_pasid_setup_fl(struct pasid_setup_fl_data *data)
 	info.ats_supported = data->ats_supported;
 	info.pasid_table = &table;
 	info.iommu = iommu;
-	dev_iommu.priv = (void *)&info;
-	dev.iommu = &dev_iommu;
 
-	ret = accept_ts_page_donation(iommu, &data->ts_page_gpa);
+	ret = accept_page_donation(iommu, &data->donation_page_gpa);
 	if (ret)
 		return ret;
 
@@ -296,15 +295,22 @@ int pkvm_iommu_pasid_setup_fl(struct pasid_setup_fl_data *data)
 					       data->old_did, data->flags);
 }
 
-int pkvm_iommu_pasid_setup_sl(struct pasid_setup_sl_data *data)
+int pkvm_iommu_pasid_setup_fl(struct pasid_setup_fl_data *in, struct pasid_setup_fl_data *out)
+{
+	int ret = iommu_pasid_setup_fl(in);
+
+	*out = *in;
+	return ret;
+}
+
+static int iommu_pasid_setup_sl(struct pasid_setup_sl_data *data)
 {
 	struct intel_iommu *iommu = iommu_from_phys(data->phys);
 	u16 bdf = PCI_DEVID(data->bus, data->devfn);
 	struct device_domain_info info = { 0 };
-	struct dev_iommu dev_iommu = { 0 };
+	struct pkvm_device dev = { .info = &info };
 	struct dmar_domain domain = { 0 };
 	struct pasid_table table = { 0 };
-	struct device dev = { 0 };
 	int ret;
 
 	if (!iommu)
@@ -324,19 +330,10 @@ int pkvm_iommu_pasid_setup_sl(struct pasid_setup_sl_data *data)
 	if (ret)
 		return ret;
 
-	if (__pkvm_pa(table.table) != pkvm_host_gpa_to_phys(data->pasid_dir_gpa)) {
-		pkvm_err("%s: pasid dir address mismatch(%lx != %llx)\n",
-			 __func__, __pkvm_pa(table.table),
-			 pkvm_host_gpa_to_phys(data->pasid_dir_gpa));
-		table.table = pkvm_host_gpa_to_virt(data->pasid_dir_gpa);
-	}
-
 	info.bus = data->bus;
 	info.devfn = data->devfn;
 	info.pasid_table = &table;
 	info.iommu = iommu;
-	dev_iommu.priv = (void *)&info;
-	dev.iommu = &dev_iommu;
 	info.ats_qdep = data->ats_qdep;
 	info.ats_supported = data->ats_supported;
 	info.ats_enabled = data->ats_enabled;
@@ -349,20 +346,14 @@ int pkvm_iommu_pasid_setup_sl(struct pasid_setup_sl_data *data)
 		 * as second stage pagetable so as to limit device access
 		 * to host memory.
 		 */
-		if (data->old_did)
-			return -EINVAL;
-
 		domain.pgd = __pkvm_va(pkvm_host_ept_root());
 		domain.agaw = level_to_agaw(pkvm_host_ept_level());
 	} else {
-		if (data->agaw != iommu->agaw)
-			return -EINVAL;
-
 		domain.pgd = pkvm_host_gpa_to_virt(data->ssptptr_gpa);
 		domain.agaw = iommu->agaw;
 	}
 
-	ret = accept_ts_page_donation(iommu, &data->ts_page_gpa);
+	ret = accept_page_donation(iommu, &data->donation_page_gpa);
 	if (ret)
 		return ret;
 
@@ -377,14 +368,21 @@ int pkvm_iommu_pasid_setup_sl(struct pasid_setup_sl_data *data)
 						data->pasid);
 }
 
+int pkvm_iommu_pasid_setup_sl(struct pasid_setup_sl_data *in, struct pasid_setup_sl_data *out)
+{
+	int ret = iommu_pasid_setup_sl(in);
+
+	*out = *in;
+	return ret;
+}
+
 int pkvm_iommu_pasid_teardown(struct pasid_teardown_data *data)
 {
 	struct intel_iommu *iommu = iommu_from_phys(data->phys);
 	u16 bdf = PCI_DEVID(data->bus, data->devfn);
 	struct device_domain_info info = { 0 };
-	struct dev_iommu dev_iommu = { 0 };
+	struct pkvm_device dev = { .info = &info };
 	struct pasid_table table = { 0 };
-	struct device dev = { 0 };
 	int ret;
 
 	if (!iommu)
@@ -411,8 +409,6 @@ int pkvm_iommu_pasid_teardown(struct pasid_teardown_data *data)
 	info.ats_supported = data->ats_supported;
 	info.pasid_table = &table;
 	info.iommu = iommu;
-	dev_iommu.priv = (void *)&info;
-	dev.iommu = &dev_iommu;
 
 	pkvm_dbg("%s: dev[%x:%x], pasid: %x, ats_qdep: %d\n", __func__,
 		 data->bus, data->devfn, data->pasid, data->ats_qdep);
@@ -458,20 +454,21 @@ int pkvm_iommu_alloc_domain(struct alloc_domain_data *data)
 	bool need_iotlb_sync_map;
 
 	iommu = iommu_from_phys(data->phys);
+	if (!iommu)
+		return -EINVAL;
+
 	ret = __validate_domain_params(iommu, data);
 	if (ret)
 		return ret;
 
 	pgd = pkvm_host_gpa_to_virt(data->pgd_gpa);
 	pkvm_dbg("%s: write protecting pgd: %p\n", __func__, pgd);
-	ret = pkvm_host_donate_hyp_share_ro(data->pgd_gpa, VTD_PAGE_SIZE, true);
+	ret = pkvm_host_donate_hyp_share_ro(__pkvm_pa(pgd), VTD_PAGE_SIZE, true);
 	if (ret) {
 		pkvm_err("%s: failed to write protect pgd: %p (err=%d)\n",
 			 __func__, pgd, ret);
 		return ret;
 	}
-
-	__iommu_flush_cache(iommu, pgd, VTD_PAGE_SIZE);
 
 	need_iotlb_sync_map = cap_caching_mode(iommu->cap) && !data->use_first_level;
 	domain = pkvm_alloc_iommu_domain(data, need_iotlb_sync_map);
@@ -481,15 +478,17 @@ int pkvm_iommu_alloc_domain(struct alloc_domain_data *data)
 		return PTR_ERR(domain);
 	}
 
+	domain_flush_cache(domain, pgd, VTD_PAGE_SIZE);
+
 	pkvm_dbg("%s: allocated domain(pgd=%p) for device[%x]\n", __func__,
 		 pgd, data->bdf);
 	return 0;
 }
 
-int pkvm_iommu_free_domain(struct free_domain_data *data)
+int pkvm_iommu_free_domain(u64 pgd_gpa, struct pkvm_memcache *mc)
 {
 	struct dmar_domain *domain;
-	void *pgd = pkvm_host_gpa_to_virt(data->pgd_gpa);
+	void *pgd = pkvm_host_gpa_to_virt(pgd_gpa);
 	int ret;
 
 	domain = pkvm_get_iommu_domain_noref(pgd);
@@ -498,16 +497,13 @@ int pkvm_iommu_free_domain(struct free_domain_data *data)
 		return -EINVAL;
 	}
 
-	memset(&data->mc, 0, sizeof(data->mc));
-	ret = pkvm_free_iommu_domain(domain, &data->mc);
+	memset(mc, 0, sizeof(*mc));
+	ret = pkvm_free_iommu_domain(domain, mc);
 	if (ret) {
 		pkvm_err("%s: failed to free the domain[pgd:%p] (err=%d)\n",
 			 __func__, pgd, ret);
 		return ret;
 	}
-
-	pkvm_dbg("%s: remove write protect pgd: %p\n", __func__, pgd);
-	pkvm_hyp_donate_host(data->pgd_gpa, VTD_PAGE_SIZE, false);
 
 	return ret;
 }
