@@ -376,8 +376,6 @@ static int pkvm_vm_finalize(int vm_handle)
 		kvm->arch.pkvm.pvmfw_load_addr = pvmfw_load_addr;
 	}
 
-	kvm->arch.bsp_vcpu_id = shared_kvm->arch.bsp_vcpu_id;
-
 	for (i = 0; i < kvm->created_vcpus; i++) {
 		struct kvm_vcpu *vcpu = &pkvm_vm->vcpus[i]->vcpu;
 
@@ -412,62 +410,6 @@ static void unsetup_vcpu_lapic(struct kvm_vcpu *vcpu)
 	pkvm_host_unshare_hyp(__pkvm_pa(apic->regs), PAGE_SIZE);
 }
 
-static int postponed_per_vm_setup(struct kvm *kvm)
-{
-	struct pkvm_vm *pkvm_vm = to_pkvm(kvm);
-	struct kvm *shared_kvm = pkvm_vm->shared_kvm;
-	enum kvm_irqchip_mode irqchip_mode;
-	u32 max_vcpu_ids;
-	u64 apic_bus_cycle_ns;
-
-	if (pkvm_vm->postponed_setup_done)
-		return 0;
-
-	irqchip_mode = READ_ONCE(shared_kvm->arch.irqchip_mode);
-	if (irqchip_mode != KVM_IRQCHIP_NONE &&
-	    irqchip_mode != KVM_IRQCHIP_KERNEL &&
-	    irqchip_mode != KVM_IRQCHIP_SPLIT)
-		return -EINVAL;
-
-	max_vcpu_ids = READ_ONCE(shared_kvm->arch.max_vcpu_ids);
-	if (!max_vcpu_ids || max_vcpu_ids > KVM_MAX_VCPU_IDS)
-		return -EINVAL;
-
-	apic_bus_cycle_ns = READ_ONCE(shared_kvm->arch.apic_bus_cycle_ns);
-	if (!apic_bus_cycle_ns)
-		return -EINVAL;
-
-	/*
-	 * The following setup is per VM, not per vCPU, however it cannot be
-	 * done during VM creation, since these values are set by the host VMM
-	 * via an ioctl after a VM is already created. At the same time, the
-	 * host KVM relies on these values being already set when setting up a
-	 * vCPU, thus implicitly assuming that the VMM should set them before
-	 * creating vCPUs. So it is ok to assume these host's values here are
-	 * up-to-date.
-	 */
-
-	kvm->arch.irqchip_mode = irqchip_mode;
-	kvm->arch.max_vcpu_ids = max_vcpu_ids;
-	kvm->arch.apic_bus_cycle_ns = apic_bus_cycle_ns;
-
-	if (kvm_caps.has_bus_lock_exit)
-		kvm->arch.bus_lock_detection_enabled =
-			shared_kvm->arch.bus_lock_detection_enabled;
-
-	if (kvm_caps.has_notify_vmexit) {
-		kvm->arch.notify_window = shared_kvm->arch.notify_window;
-		kvm->arch.notify_vmexit_flags = shared_kvm->arch.notify_vmexit_flags;
-	}
-
-	if (!pkvm_is_protected_vm(kvm))
-		kvm->arch.disabled_exits = shared_kvm->arch.disabled_exits;
-
-	pkvm_vm->postponed_setup_done = true;
-
-	return 0;
-}
-
 static int share_vcpu_mce_banks(struct kvm_vcpu *vcpu)
 {
 	int ret;
@@ -493,6 +435,90 @@ static void unshare_vcpu_mce_banks(struct kvm_vcpu *vcpu)
 
 	pkvm_host_unshare_hyp(__pkvm_pa(vcpu->arch.mce_banks), KVM_MCE_SIZE);
 	pkvm_host_unshare_hyp(__pkvm_pa(vcpu->arch.mci_ctl2_banks), KVM_MCI_CTL2_SIZE);
+}
+
+static __maybe_unused void pkvm_vcpu_reset(struct kvm_vcpu *vcpu,
+					   bool init_event)
+{
+	kvm_vcpu_reset(vcpu, init_event);
+
+	if (lapic_in_kernel(vcpu) && vcpu->arch.apic->guest_apic_protected) {
+		/*
+		 * TPR is the key register for the protected APIC, as it will be
+		 * used by the APICv to evaluate pending interrupts. To prevent
+		 * the host from injecting exception vectors (0 - 31) via the
+		 * posted interrupt mechanism into the pVM, the TPR should be
+		 * set as 0x10 to prevent both class 1 and class 0 interrupts.
+		 * As the pVM OS may not set the TPR during early boot, or even
+		 * doesn't set the TPR at all if it doesn't use APIC, these will
+		 * make the TPR as 0x0 which allows the host to inject exception
+		 * vectors (16 - 31) into the pVM and may cause security issues.
+		 * So enforce the TPR as 0x10 after reset vcpu in the pKVM to
+		 * prevent the host from injecting exception vectors from the
+		 * beginning of the pVM boot.
+		 */
+		kvm_set_cr8(vcpu, 1);
+	}
+}
+
+static int postponed_per_vm_setup(struct kvm *kvm)
+{
+	struct pkvm_vm *pkvm_vm = to_pkvm(kvm);
+	struct kvm *shared_kvm = pkvm_vm->shared_kvm;
+	enum kvm_irqchip_mode irqchip_mode;
+	u32 max_vcpu_ids, bsp_vcpu_id;
+	u64 apic_bus_cycle_ns;
+
+	if (pkvm_vm->postponed_setup_done)
+		return 0;
+
+	irqchip_mode = READ_ONCE(shared_kvm->arch.irqchip_mode);
+	if (irqchip_mode != KVM_IRQCHIP_NONE &&
+	    irqchip_mode != KVM_IRQCHIP_KERNEL &&
+	    irqchip_mode != KVM_IRQCHIP_SPLIT)
+		return -EINVAL;
+
+	max_vcpu_ids = READ_ONCE(shared_kvm->arch.max_vcpu_ids);
+	if (!max_vcpu_ids || max_vcpu_ids > KVM_MAX_VCPU_IDS)
+		return -EINVAL;
+
+	bsp_vcpu_id = READ_ONCE(shared_kvm->arch.bsp_vcpu_id);
+	if (bsp_vcpu_id >= max_vcpu_ids)
+		return -EINVAL;
+
+	apic_bus_cycle_ns = READ_ONCE(shared_kvm->arch.apic_bus_cycle_ns);
+	if (!apic_bus_cycle_ns)
+		return -EINVAL;
+
+	/*
+	 * The following setup is per VM, not per vCPU, however it cannot be
+	 * done during VM creation, since these values are set by the host VMM
+	 * via an ioctl after a VM is already created. At the same time, the
+	 * host KVM relies on these values being already set when setting up a
+	 * vCPU, thus implicitly assuming that the VMM should set them before
+	 * creating vCPUs. So it is ok to assume these host's values here are
+	 * up-to-date.
+	 */
+
+	kvm->arch.irqchip_mode = irqchip_mode;
+	kvm->arch.max_vcpu_ids = max_vcpu_ids;
+	kvm->arch.bsp_vcpu_id = bsp_vcpu_id;
+	kvm->arch.apic_bus_cycle_ns = apic_bus_cycle_ns;
+
+	if (kvm_caps.has_bus_lock_exit)
+		kvm->arch.bus_lock_detection_enabled =
+			shared_kvm->arch.bus_lock_detection_enabled;
+
+	if (kvm_caps.has_notify_vmexit) {
+		kvm->arch.notify_window = shared_kvm->arch.notify_window;
+		kvm->arch.notify_vmexit_flags = shared_kvm->arch.notify_vmexit_flags;
+	}
+
+	if (!pkvm_is_protected_vm(kvm))
+		kvm->arch.disabled_exits = shared_kvm->arch.disabled_exits;
+
+	pkvm_vm->postponed_setup_done = true;
+	return 0;
 }
 
 static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate *fps,
@@ -554,7 +580,6 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 	}
 	vcpu->arch.mcg_cap = KVM_MAX_MCE_BANKS;
 
-	vcpu->arch.apic_base = pkvm_vcpu->shared_vcpu->arch.apic_base;
 	if (shared_apic)
 		vcpu->arch.apic = unused;
 
