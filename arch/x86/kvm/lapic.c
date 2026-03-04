@@ -55,8 +55,12 @@
 #define mod_64(x, y) ((x) % (y))
 #endif
 
+#endif /* !__PKVM_HYP__ */
+
 /* 14 is the version for Xeon and Pentium 8.4.8*/
 #define APIC_VERSION			0x14UL
+
+#ifndef __PKVM_HYP__
 #define LAPIC_MMIO_LENGTH		(1 << 12)
 
 /*
@@ -82,12 +86,14 @@ module_param_named(vector_hashing, vector_hashing_enabled, bool, 0444);
 
 static int kvm_lapic_msr_read(struct kvm_lapic *apic, u32 reg, u64 *data);
 static int kvm_lapic_msr_write(struct kvm_lapic *apic, u32 reg, u64 data);
+#endif /* !__PKVM_HYP__ */
 
 static inline void kvm_lapic_set_reg(struct kvm_lapic *apic, int reg_off, u32 val)
 {
 	apic_set_reg(apic->regs, reg_off, val);
 }
 
+#ifndef __PKVM_HYP__
 static __always_inline u64 kvm_lapic_get_reg64(struct kvm_lapic *apic, int reg)
 {
 	return apic_get_reg64(apic->regs, reg);
@@ -653,6 +659,7 @@ static const unsigned int apic_lvt_mask[KVM_APIC_MAX_NR_LVT_ENTRIES] = {
 	[LVT_ERROR] = LVT_MASK,
 	[LVT_CMCI] = LVT_MASK | APIC_MODE_MASK
 };
+#endif /* !__PKVM_HYP__ */
 
 static u8 count_vectors(void *bitmap)
 {
@@ -668,6 +675,7 @@ static u8 count_vectors(void *bitmap)
 	return count;
 }
 
+#ifndef __PKVM_HYP__
 bool __kvm_apic_update_irr(unsigned long *pir, void *regs, int *max_irr)
 {
 	unsigned long pir_vals[NR_PIR_WORDS];
@@ -718,6 +726,7 @@ bool kvm_apic_update_irr(struct kvm_vcpu *vcpu, unsigned long *pir, int *max_irr
 	return max_irr_is_from_pir;
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_apic_update_irr);
+#endif /* !__PKVM_HYP__ */
 
 static inline int apic_search_irr(struct kvm_lapic *apic)
 {
@@ -736,6 +745,7 @@ static inline int apic_find_highest_irr(struct kvm_lapic *apic)
 	return apic_search_irr(apic);
 }
 
+#ifndef __PKVM_HYP__
 static inline void apic_clear_irr(int vec, struct kvm_lapic *apic)
 {
 	if (unlikely(apic->apicv_active)) {
@@ -783,6 +793,7 @@ static inline void apic_set_isr(int vec, struct kvm_lapic *apic)
 		apic->highest_isr_cache = vec;
 	}
 }
+#endif /* !__PKVM_HYP__ */
 
 static inline int apic_find_highest_isr(struct kvm_lapic *apic)
 {
@@ -798,6 +809,7 @@ static inline int apic_find_highest_isr(struct kvm_lapic *apic)
 	return apic_find_highest_vector(apic->regs + APIC_ISR);
 }
 
+#ifndef __PKVM_HYP__
 static inline void apic_clear_isr(int vec, struct kvm_lapic *apic)
 {
 	if (!__test_and_clear_bit(APIC_VECTOR_TO_BIT_NUMBER(vec),
@@ -945,6 +957,7 @@ static bool pv_eoi_test_and_clr_pending(struct kvm_vcpu *vcpu)
 
 	return val;
 }
+#endif /* !__PKVM_HYP__ */
 
 static int apic_has_interrupt_for_ppr(struct kvm_lapic *apic, u32 ppr)
 {
@@ -989,6 +1002,7 @@ static void apic_update_ppr(struct kvm_lapic *apic)
 		kvm_make_request(KVM_REQ_EVENT, apic->vcpu);
 }
 
+#ifndef __PKVM_HYP__
 void kvm_apic_update_ppr(struct kvm_vcpu *vcpu)
 {
 	apic_update_ppr(vcpu->arch.apic);
@@ -2752,6 +2766,7 @@ u64 kvm_lapic_get_cr8(struct kvm_vcpu *vcpu)
 
 	return (tpr & 0xf0) >> 4;
 }
+#endif /* !__PKVM_HYP__ */
 
 static void __kvm_apic_set_base(struct kvm_vcpu *vcpu, u64 value)
 {
@@ -2766,6 +2781,7 @@ static void __kvm_apic_set_base(struct kvm_vcpu *vcpu, u64 value)
 	if (!apic)
 		return;
 
+#ifndef __PKVM_HYP__
 	/* update jump label if enable bit changes */
 	if ((old_value ^ value) & MSR_IA32_APICBASE_ENABLE) {
 		if (value & MSR_IA32_APICBASE_ENABLE) {
@@ -2785,12 +2801,14 @@ static void __kvm_apic_set_base(struct kvm_vcpu *vcpu, u64 value)
 		else if (value & MSR_IA32_APICBASE_ENABLE)
 			kvm_apic_set_xapic_id(apic, vcpu->vcpu_id);
 	}
+#endif
 
 	if ((old_value ^ value) & (MSR_IA32_APICBASE_ENABLE | X2APIC_ENABLE)) {
 		kvm_make_request(KVM_REQ_APICV_UPDATE, vcpu);
 		kvm_x86_call(set_virtual_apic_mode)(vcpu);
 	}
 
+#ifndef __PKVM_HYP__
 	apic->base_address = apic->vcpu->arch.apic_base &
 			     MSR_IA32_APICBASE_BASE;
 
@@ -2799,8 +2817,10 @@ static void __kvm_apic_set_base(struct kvm_vcpu *vcpu, u64 value)
 		kvm_set_apicv_inhibit(apic->vcpu->kvm,
 				      APICV_INHIBIT_REASON_APIC_BASE_MODIFIED);
 	}
+#endif
 }
 
+#ifndef __PKVM_HYP__
 int kvm_apic_set_base(struct kvm_vcpu *vcpu, u64 value, bool host_initiated)
 {
 	enum lapic_mode old_mode = kvm_get_apic_mode(vcpu);
@@ -2826,6 +2846,7 @@ int kvm_apic_set_base(struct kvm_vcpu *vcpu, u64 value, bool host_initiated)
 	return 0;
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_apic_set_base);
+#endif /* !__PKVM_HYP__ */
 
 void kvm_apic_update_apicv(struct kvm_vcpu *vcpu)
 {
@@ -2861,6 +2882,7 @@ void kvm_apic_update_apicv(struct kvm_vcpu *vcpu)
 	}
 }
 
+#ifndef __PKVM_HYP__
 int kvm_alloc_apic_access_page(struct kvm *kvm)
 {
 	void __user *hva;
@@ -2916,6 +2938,7 @@ void kvm_inhibit_apic_access_page(struct kvm_vcpu *vcpu)
 
 	kvm_vcpu_srcu_read_lock(vcpu);
 }
+#endif /* !__PKVM_HYP__ */
 
 void kvm_lapic_reset(struct kvm_vcpu *vcpu, bool init_event)
 {
@@ -2923,7 +2946,9 @@ void kvm_lapic_reset(struct kvm_vcpu *vcpu, bool init_event)
 	u64 msr_val;
 	int i;
 
+#ifndef __PKVM_HYP__
 	kvm_x86_call(apicv_pre_state_restore)(vcpu);
+#endif
 
 	if (!init_event) {
 		msr_val = APIC_DEFAULT_PHYS_BASE | MSR_IA32_APICBASE_ENABLE;
@@ -2942,6 +2967,7 @@ void kvm_lapic_reset(struct kvm_vcpu *vcpu, bool init_event)
 	if (!apic)
 		return;
 
+#ifndef __PKVM_HYP__
 	/* Stop the timer in case it's a reset to an active apic */
 	hrtimer_cancel(&apic->lapic_timer.timer);
 
@@ -2961,7 +2987,9 @@ void kvm_lapic_reset(struct kvm_vcpu *vcpu, bool init_event)
 
 	kvm_apic_set_dfr(apic, 0xffffffffU);
 	apic_set_spiv(apic, 0xff);
+#endif
 	kvm_lapic_set_reg(apic, APIC_TASKPRI, 0);
+#ifndef __PKVM_HYP__
 	if (!apic_x2apic_mode(apic))
 		kvm_apic_set_ldr(apic, 0);
 	kvm_lapic_set_reg(apic, APIC_ESR, 0);
@@ -2973,26 +3001,34 @@ void kvm_lapic_reset(struct kvm_vcpu *vcpu, bool init_event)
 	}
 	kvm_lapic_set_reg(apic, APIC_TDCR, 0);
 	kvm_lapic_set_reg(apic, APIC_TMICT, 0);
+#endif
 	for (i = 0; i < 8; i++) {
 		kvm_lapic_set_reg(apic, APIC_IRR + 0x10 * i, 0);
 		kvm_lapic_set_reg(apic, APIC_ISR + 0x10 * i, 0);
 		kvm_lapic_set_reg(apic, APIC_TMR + 0x10 * i, 0);
 	}
 	kvm_apic_update_apicv(vcpu);
+#ifndef __PKVM_HYP__
 	update_divide_count(apic);
 	atomic_set(&apic->lapic_timer.pending, 0);
 
 	vcpu->arch.pv_eoi.msr_val = 0;
+#endif
 	apic_update_ppr(apic);
+#ifndef __PKVM_HYP__
 	if (apic->apicv_active)
 		kvm_x86_call(apicv_post_state_restore)(vcpu);
+#endif
 
+#ifndef __PKVM_HYP__
 	vcpu->arch.apic_arb_prio = 0;
 	vcpu->arch.apic_attention = 0;
 
 	kvm_recalculate_apic_map(vcpu->kvm);
+#endif
 }
 
+#ifndef __PKVM_HYP__
 /*
  *----------------------------------------------------------------------
  * timer interface
