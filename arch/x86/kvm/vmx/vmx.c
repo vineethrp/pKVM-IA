@@ -7822,8 +7822,11 @@ int vmx_sync_pir_to_irr(struct kvm_vcpu *vcpu)
 {
 #ifndef __PKVM_HYP__
 	struct vcpu_vt *vt = to_vt(vcpu);
-	bool max_irr_is_from_pir;
+#else
+	struct vcpu_vt *vt = to_vt(to_pkvm_vcpu(vcpu)->shared_vcpu);
+#endif
 	int max_irr;
+	bool max_irr_is_from_pir;
 
 	if (KVM_BUG_ON(!enable_apicv, vcpu->kvm))
 		return -EIO;
@@ -7882,22 +7885,16 @@ int vmx_sync_pir_to_irr(struct kvm_vcpu *vcpu)
 	 * pending IRQs.
 	 */
 	if (!is_guest_mode(vcpu) && kvm_vcpu_apicv_active(vcpu)) {
-#ifdef CONFIG_PKVM_INTEL
-		if (!enable_pkvm)
-			vmx_set_rvi(max_irr);
-		else if (max_irr != -1)
-			KVM_BUG_ON(pkvm_hypercall(sync_pir_to_irr, max_irr), vcpu->kvm);
-#else
-		vmx_set_rvi(max_irr);
+#ifndef __PKVM_HYP__
+		if (enable_pkvm)
+			/* RVI will be updated by the pKVM before entering the guest. */
+			return max_irr;
 #endif
+		vmx_set_rvi(max_irr);
 	} else if (max_irr_is_from_pir) {
 		kvm_make_request(KVM_REQ_EVENT, vcpu);
 	}
-#else
-	int max_irr = to_pkvm_vcpu(vcpu)->max_irr;
 
-	vmx_set_rvi(max_irr);
-#endif
 	return max_irr;
 }
 
