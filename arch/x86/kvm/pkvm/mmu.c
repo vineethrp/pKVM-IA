@@ -7,6 +7,7 @@
 #include "mmu.h"
 #include "pgtable.h"
 #include "pkvm.h"
+#include "debug.h"
 
 static struct pkvm_pgtable hyp_mmu;
 static struct pkvm_pool hyp_mmu_pool;
@@ -19,6 +20,22 @@ static struct pkvm_pgtable_cap guest_mmu_pgt_cap;
 
 static DEFINE_PER_CPU(struct pkvm_vm *, __current_vm);
 #define current_vm (*this_cpu_ptr(&__current_vm))
+
+static iommu_tlb_flush_fn_t iommu_tlb_flush_fn;
+
+void register_iommu_tlb_flush(iommu_tlb_flush_fn_t fn)
+{
+	if (cmpxchg(&iommu_tlb_flush_fn, NULL, fn) != NULL)
+		pkvm_err("tlb_flush for IOMMU already registered!\n");
+}
+
+static void iommu_tlb_flush(unsigned long addr, unsigned long size)
+{
+	iommu_tlb_flush_fn_t fn = smp_load_acquire(&iommu_tlb_flush_fn);
+
+	if (fn)
+		fn(addr, size);
+}
 
 static void *hyp_mmu_zalloc_page(struct pkvm_memcache *mc)
 {
@@ -1044,14 +1061,17 @@ int pkvm_host_donate_hyp(unsigned long phys, unsigned long size, bool clear)
 unlock:
 	pkvm_host_mmu_unlock();
 
-	if (!ret && clear) {
+	if (!ret) {
 		/*
 		 * No need to flush CPU cache, like what pkvm_clear_memory()
 		 * does, as the pKVM hypervisor doesn't access memory via
 		 * non-coherent DMA (actually there is no DMA in the pKVM
 		 * hypervisor).
 		 */
-		memset(__pkvm_va(phys), 0, size);
+		if (clear)
+			memset(__pkvm_va(phys), 0, size);
+
+		iommu_tlb_flush(phys, size);
 	}
 
 	return ret;
@@ -1098,14 +1118,17 @@ int pkvm_host_donate_hyp_share_ro(unsigned long phys, unsigned long size, bool c
 unlock:
 	pkvm_host_mmu_unlock();
 
-	if (!ret && clear) {
+	if (!ret) {
 		/*
 		 * No need to flush CPU cache, like what pkvm_clear_memory()
 		 * does, as the pKVM hypervisor doesn't access memory via
 		 * non-coherent DMA (actually there is no DMA in the pKVM
 		 * hypervisor).
 		 */
-		memset(__pkvm_va(phys), 0, size);
+		if (clear)
+			memset(__pkvm_va(phys), 0, size);
+
+		iommu_tlb_flush(phys, size);
 	}
 
 	return ret;
@@ -1217,6 +1240,8 @@ int pkvm_host_donate_hyp_mmio(unsigned long phys, unsigned long size)
 	ret = pkvm_pgtable_set_owner(&host_mmu, phys, size, PKVM_ID_HYP);
 
 	pkvm_host_mmu_unlock();
+	if (!ret)
+		iommu_tlb_flush(phys, size);
 	return ret;
 }
 
@@ -1463,6 +1488,8 @@ unlock:
 	pkvm_guest_mmu_unlock(pkvm_vm);
 	pkvm_host_mmu_unlock();
 
+	if (!ret)
+		iommu_tlb_flush(pkvm_host_gpa_to_phys(hpa), size);
 	return ret;
 }
 

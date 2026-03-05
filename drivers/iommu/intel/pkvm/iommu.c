@@ -514,12 +514,7 @@ int pkvm_intel_iommu_init(void)
 	}
 
 	init_pt_domain();
+	register_iommu_tlb_flush(pkvm_intel_iommu_tlb_flush);
 
 	return 0;
-}
-
-void pkvm_iommu_pt_flush(unsigned long paddr, unsigned long size)
-{
-	if (pt_domain.qi_batch)
-		cache_tag_flush_range(&pt_domain, paddr, paddr + size - 1, 0);
 }
