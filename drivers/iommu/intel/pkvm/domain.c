@@ -299,7 +299,7 @@ int pkvm_iommu_domain_map(struct domain_map_data *in, struct domain_map_data *ou
 	return ret;
 }
 
-int pkvm_iommu_domain_unmap(u64 pgd_gpa, u64 start_pfn, u64 last_pfn)
+int pkvm_iommu_domain_unmap(u64 pgd_gpa, u64 start_pfn, u64 last_pfn, bool dma_fq)
 {
 	struct dmar_domain *domain;
 
@@ -311,6 +311,7 @@ int pkvm_iommu_domain_unmap(u64 pgd_gpa, u64 start_pfn, u64 last_pfn)
 	}
 
 	pkvm_spin_lock(&domain->lock);
+	domain->dma_fq = dma_fq;
 	domain_unmap(domain, start_pfn, last_pfn, NULL);
 	pkvm_spin_unlock(&domain->lock);
 
