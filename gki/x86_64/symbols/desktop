@@ -854,6 +854,7 @@
   drm_dev_register
   drm_dev_set_dma_dev
   drm_dev_unplug
+  drm_dev_unregister
   drm_dev_wedged_event
   drm_display_mode_from_cea_vic
   drm_edid_alloc
@@ -1633,6 +1634,7 @@
   kernel_sendmsg
   kernel_sock_shutdown
   key_put
+  keyring_alloc
   __kfifo_alloc
   __kfifo_free
   __kfifo_from_user
@@ -3537,6 +3539,7 @@
   vchan_init
   vchan_tx_desc_free
   vchan_tx_submit
+  verify_pkcs7_signature
   vfree
   vfs_fsync_range
   vga_client_register
