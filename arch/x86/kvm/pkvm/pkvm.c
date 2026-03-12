@@ -608,7 +608,7 @@ static int __vcpu_create(struct kvm *kvm, struct kvm_vcpu *vcpu, struct fpstate 
 
 	kvm_vcpu_after_set_cpuid(vcpu);
 
-	kvm_vcpu_reset(vcpu, false);
+	pkvm_vcpu_reset(vcpu, false);
 
 	if (pkvm_is_protected_vcpu(vcpu)) {
 		u64 apic_base = APIC_DEFAULT_PHYS_BASE | LAPIC_MODE_X2APIC |
@@ -1527,7 +1527,7 @@ static void pkvm_vcpu_pvmfw_entry_init(struct kvm_vcpu *vcpu)
 
 static void pkvm_vcpu_ap_entry_init(struct kvm_vcpu *vcpu)
 {
-	kvm_vcpu_reset(vcpu, true);
+	pkvm_vcpu_reset(vcpu, true);
 	kvm_vcpu_deliver_sipi_vector(vcpu, vcpu->arch.apic->sipi_vector);
 }
 
