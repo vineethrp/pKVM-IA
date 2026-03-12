@@ -6,6 +6,7 @@
 #include <asm/pkvm_spinlock.h>
 #include "pkvm/debug.h"
 #include "pkvm/memory.h"
+#include "pkvm/vmx/ept.h"
 #include "../iommu.h"
 
 /*
@@ -22,6 +23,8 @@ void init_pt_domain(void)
 {
 	INIT_LIST_HEAD(&pt_domain.cache_tags);
 	pkvm_spin_lock_init(&pt_domain.cache_lock);
+	pt_domain.pgd = __pkvm_va(pkvm_host_ept_root());
+	pt_domain.agaw = level_to_agaw(pkvm_host_ept_level());
 	pt_domain.qi_batch = &pt_domain._qi_batch;
 }
 
@@ -74,7 +77,7 @@ void pkvm_put_iommu_domain(struct dmar_domain *domain)
 	WARN_ON_ONCE(atomic_dec_if_positive(&domain->refcount) <= 0);
 }
 
-int pkvm_get_domain_cache_tag_assign(void *pgd, int did, u32 pasid,
+int pkvm_get_domain_cache_tag_assign(void *pgd, int did, u32 pasid, bool nested,
 				     struct device_domain_info *info)
 {
 	struct pkvm_device dev = { .info = info };
@@ -93,6 +96,15 @@ int pkvm_get_domain_cache_tag_assign(void *pgd, int did, u32 pasid,
 		return -EFAULT;
 	}
 
+	if (nested && domain->domain.type != IOMMU_DOMAIN_NESTED) {
+		/*
+		 * Release the pgd page back to host as host would be
+		 * controlling the first level pagetable updates.
+		 */
+		pkvm_hyp_donate_host(__pkvm_pa(domain->pgd), VTD_PAGE_SIZE, false);
+		domain->domain.type = IOMMU_DOMAIN_NESTED;
+		domain->s2_domain = &pt_domain;
+	}
 	ret = cache_tag_assign_domain(domain, did, &dev, pasid);
 	if (ret) {
 		pkvm_put_iommu_domain(domain);
@@ -176,6 +188,9 @@ int pkvm_free_iommu_domain(struct dmar_domain *domain, struct pkvm_memcache *tea
 		return -EBUSY;
 	}
 
+	if (domain->domain.type == IOMMU_DOMAIN_NESTED)
+		goto release_domain;
+
 	/* Unmap any remaining mappings. */
 	domain_unmap(domain, 0, DOMAIN_MAX_PFN(domain->gaw), NULL);
 	free_domain_memcache(domain, teardown_mc);
@@ -187,6 +202,7 @@ int pkvm_free_iommu_domain(struct dmar_domain *domain, struct pkvm_memcache *tea
 	push_pkvm_memcache_page(teardown_mc, domain->pgd, pkvm_virt_to_host_gpa);
 	pkvm_hyp_donate_host(__pkvm_pa(domain->pgd), VTD_PAGE_SIZE, false);
 
+release_domain:
 	pkvm_dbg("%s: freeing domain[pgd: %p], freed pages: %lu\n",
 		 __func__, domain->pgd, teardown_mc->count);
 
