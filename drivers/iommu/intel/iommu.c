@@ -2701,6 +2701,10 @@ static int iommu_suspend(void)
 	struct intel_iommu *iommu = NULL;
 	unsigned long flag;
 
+	/* pKVM doesn't support S3 suspend */
+	if (WARN_ON(pkvm_enabled()))
+		return -EOPNOTSUPP;
+
 	iommu_flush_all();
 
 	for_each_active_iommu(iommu, drhd) {
@@ -2727,6 +2731,10 @@ static void iommu_resume(void)
 	struct dmar_drhd_unit *drhd;
 	struct intel_iommu *iommu = NULL;
 	unsigned long flag;
+
+	/* pKVM doesn't support S3 suspend */
+	if (WARN_ON(pkvm_enabled()))
+		return;
 
 	if (init_iommu_hw()) {
 		if (force_on)
