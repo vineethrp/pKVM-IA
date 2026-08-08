@@ -14,6 +14,7 @@ KVM for x86 systems
    intel-tdx
    mmu
    msr
+   pkvm-ia-porting-plan
    nested-vmx
    running-nested-guests
    timekeeping
