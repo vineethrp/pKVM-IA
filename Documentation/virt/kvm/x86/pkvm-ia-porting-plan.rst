@@ -186,6 +186,54 @@ For each rewrite checkpoint:
 5. use the Ubuntu VM for broader lifecycle, pVM, or IOMMU validation at major
    boundaries and before declaring Phase 1 complete.
 
+Nested npVM and pVM acceptance
+==============================
+
+Material refactors and port milestones must also pass the nested guest
+matrix.  The topology is always::
+
+  vinp2 development host
+    -> L1 Ubuntu VM running the kernel under test with kvm-intel.pkvm=1
+      -> L2 npVM or pVM
+
+The L2 VMM must run inside L1, never directly on ``vinp2``.  Before starting
+an L2, require every L1 CPU to enter pKVM guest mode, protected DMAR to
+initialize, the pKVM hypervisor-up message to appear, and the L1 taint value
+to be zero.
+
+The required L2 cases are:
+
+* crosvm npVM, without a protected-VM option;
+* crosvm pVM, with ``--protected-vm-without-firmware``; and
+* protected QEMU pVM, launched with the VM-local
+  ``~/WS/pkvm_vmm/qemu-vm/runpvm.sh``.
+
+For the protected-QEMU case, use the QEMU binary and artifacts already inside
+L1.  The VM-local script uses ``-accel kvm,dirty-ring-size=0`` and
+``-machine pkvm-microvm,confidential-guest-support=pkvm0``.  The similarly
+named script and QEMU binary on ``vinp2`` are different and are not valid
+substitutes.  Mixing the host-side artifacts with the VM-local test produced
+a false failure during the Phase 1 acceptance run.
+
+Each L2 must print its expected kernel release, mount its root filesystem,
+and reach ``basic.target``, a login prompt, or a stronger usable-system
+milestone.  The protected-QEMU guest must additionally report
+``Hypervisor detected: PKVM``.  After every case, require no new panic, BUG,
+Oops, WARNING, general-protection fault, or protected-memory-access denial in
+either L1 or L2, and recheck the L1 taint value.  Preserve the exact commands,
+kernel and disk hashes, and serial logs.  Use private disk copies where the
+test harness permits them.
+
+The final Phase 1 source at ``pkvm-v6.18-phase1-complete`` passed this matrix
+with guest kernel ``6.18.0+`` and guest ``bzImage`` SHA-256::
+
+  3e1c1f64e03609d8950903a12f40089846310ff79b1974e3953e8cb1d885af9f
+
+Both crosvm modes mounted their root filesystems and reached
+``basic.target``.  The VM-local protected-QEMU guest detected pKVM, mounted
+its root filesystem, and reached the same userspace milestone.  The L1
+finished with taint zero and no fatal kernel signature.
+
 Phase 1 progress
 ================
 
