@@ -1571,7 +1571,7 @@ Positions     Content
 503--510      pVM guest-side support
 511--562      Non-IOMMU pVM and core follow-up fixes
 563--654      Initial pvIOMMU implementation and all pvIOMMU follow-ups
-655--657      Phase 1, nested-test, and Phase 2 documentation
+655--659      Phase 1, nested-test, and Phase 2 documentation
 ============  =============================================================
 
 The eight guest-side pVM commits originally at Phase 1 positions 563--570
@@ -1639,5 +1639,55 @@ and shut down cleanly; protected DMAR was correctly absent.  The two
 post-pvIOMMU boundaries additionally initialized protected DMAR.  Their
 builds and boots passed the same taint, fatal-signature, and shutdown gates.
 
-The nested npVM/pVM matrix remains the final Phase 2 acceptance gate before
-the reordered branch is declared complete and Phase 3 begins.
+Phase 2 nested acceptance
+-------------------------
+
+The final nested matrix passed at reordered HEAD ``64c388f79aac``.  A fresh
+L1 kernel was built from ``configs/config-vm-6.18`` in 299.0 seconds.  Its
+input and resulting configuration had the same SHA-256, and its ``vmlinux``
+SHA-256 was::
+
+  edb20b5108ae2849a4ade84d2e913f10588bfa187a430a40b7ff9f41a02bc014
+
+The L1 topology was the development host running a Q35/split-irqchip VM,
+which in turn ran each L2 VMM.  All eight L1 CPUs entered pKVM guest mode,
+protected DMAR initialized, the pKVM hypervisor started, and the kernel
+remained untainted with no fatal dmesg signature.
+
+The guest ``bzImage`` was reused only after verifying the exact Phase 1 and
+Phase 2 non-documentation source-tree equivalence.  Its SHA-256, checked on
+both the development host and the L1 VM, was::
+
+  3e1c1f64e03609d8950903a12f40089846310ff79b1974e3953e8cb1d885af9f
+
+The three required L2 cases passed:
+
+* ordinary crosvm npVM booted Linux 6.18, mounted its ext4 root, and reached
+  ``basic.target``;
+* crosvm with ``--protected-vm-without-firmware`` detected pKVM, mounted its
+  ext4 root, and reached ``basic.target``; and
+* protected QEMU pVM used only the artifacts and ``runpvm.sh`` inside the L1
+  VM.  The VM-local command selected ``pkvm-microvm`` and ``pkvm-guest``;
+  the L2 detected pKVM, mounted its ext4 root, and reached ``basic.target``.
+
+No L2 showed a fatal kernel signature.  The protected-QEMU run produced no
+protected-memory access denial or new fatal L1 dmesg message.  Every VMM was
+stopped after reaching its acceptance marker, private test media were
+removed, the L1 powered off cleanly, and its host port was released.
+
+Phase 2 acceptance criteria
+---------------------------
+
+Phase 2 is complete.  The final audit verified:
+
+* all 654 source commits are present, with no left-only or right-only source
+  commit in the Phase 1-to-Phase 2 range comparison;
+* the reordered non-documentation tree is byte-identical to the final Phase
+  1 non-documentation tree;
+* ``git diff --check`` is clean and no ``SQUASHME``, ``fixup!``, or
+  ``amend!`` subject remains;
+* every new logical boundary builds and boots with its phase-appropriate
+  pKVM and protected-DMAR expectations; and
+* the complete nested npVM and pVM acceptance matrix passes.
+
+The series is therefore ready for the Phase 3 port to Linux 7.1.
