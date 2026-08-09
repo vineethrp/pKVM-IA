@@ -1557,3 +1557,87 @@ Folding all 115 candidates would have produced a theoretical minimum of 652
 commits. The final 656 consists of that minimum plus two approved in-series
 exceptions and two documentation commits; retaining truthful, bisectable
 boundaries is preferable to manufacturing misleading parent commits.
+
+Phase 2 progress
+================
+
+Phase 2 reorders the Phase 1 series without changing its final source.  The
+trial replay uses the following boundaries above ``61caa6bdaf42``:
+
+============  =============================================================
+Positions     Content
+============  =============================================================
+1--502        Deprivilege, pvVMCS, pvMMU, and common glue
+503--510      pVM guest-side support
+511--562      Non-IOMMU pVM and core follow-up fixes
+563--654      Initial pvIOMMU implementation and all pvIOMMU follow-ups
+655--657      Phase 1, nested-test, and Phase 2 documentation
+============  =============================================================
+
+The eight guest-side pVM commits originally at Phase 1 positions 563--570
+replayed immediately after the common glue without conflict.  The following
+52 non-IOMMU commits include protected-APIC support, VMX state isolation,
+host and guest EPT synchronization, hypervisor diagnostics, direct-map
+hardening, guest-range validation, and other fixes that belong to the first
+four logical parts rather than pvIOMMU.
+
+The final 92 source commits contain both the original 60-commit pvIOMMU block
+and its later IOMMU-specific follow-ups.  Generic-looking helpers stay in
+this block when their first consumer is protected VT-d; for example, the
+share-RO memcache extension changes protected-IOMMU domain refill and cannot
+truthfully precede pvIOMMU.
+
+Dependency-aware conflict resolutions
+-------------------------------------
+
+Four conflicts exposed real ordering dependencies:
+
+* host-EPT synchronization was first replayed without the not-yet-present
+  IOMMU flush, then the pvIOMMU commit inserted ``pkvm_iommu_pt_flush()``
+  before the remote-vCPU acknowledgement;
+* direct-map unmapping was first replayed without the not-yet-present IOMMU
+  initializer, then pvIOMMU restored ``pkvm_host_init_iommu()`` before the
+  direct mapping is made non-present;
+* early guest-range validation retained its expanded share/unshare API while
+  the later pvIOMMU DMA commit added the independent DMA pinning API; and
+* the pvIOMMU host-EPT flush commit retained both IOMMU invalidation and the
+  already-moved remote-vCPU wait, in that order.
+
+These resolutions reproduce the final Phase 1 source exactly.  The reordered
+non-documentation boundary ``13e7c0519f94`` has tree::
+
+  8e5e8f1864ffaceef23a17082797798fd63a3f81
+
+That is the same tree as Phase 1 non-documentation boundary
+``6a1b9596467c``.  Both ranges contain 654 source commits.
+
+Phase 2 boundary validation
+---------------------------
+
+The dedicated test agent validated each newly created dependency boundary
+from a fresh ``config-bb`` output:
+
+================  ============  ===========
+Boundary          Commit        Build time
+================  ============  ===========
+pVM guest block   19812a98172e  70.3 s
+core-fix block    4317b89369c0  69.9 s
+initial pvIOMMU   f24feaa41465  70.5 s
+final source      13e7c0519f94  70.6 s
+================  ============  ===========
+
+Their respective ``bzImage`` SHA-256 values were::
+
+  4f742608ff30685c9080aaa23a5a018327ac385c1dddebd54ade5e281dd70d47
+  ba0b684e69fa3c0367331d5e6e01ba45a9e53e54e4b6033ca367cbe7f25faeec
+  c970c751064fc0ab2a5f2201e24ddedd9b8ae130f6b0578c358f6e2a6a718d22
+  1c9b6f61fed20bb11603fcf45d17603d93af2a37f985e20539c26bc66b9b0366
+
+The first two boundaries intentionally precede pvIOMMU.  They booted four
+CPUs under pKVM, reached BusyBox, stayed untainted, showed no fatal signature,
+and shut down cleanly; protected DMAR was correctly absent.  The two
+post-pvIOMMU boundaries additionally initialized protected DMAR.  Their
+builds and boots passed the same taint, fatal-signature, and shutdown gates.
+
+The nested npVM/pVM matrix remains the final Phase 2 acceptance gate before
+the reordered branch is declared complete and Phase 3 begins.
