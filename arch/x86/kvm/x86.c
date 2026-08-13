@@ -10307,8 +10307,7 @@ void kvm_setup_xss_caps(void)
 }
 EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_setup_xss_caps);
 
-#ifndef __PKVM_HYP__
-static void kvm_setup_efer_caps(void)
+void kvm_setup_efer_caps(void)
 {
 	if (kvm_cpu_cap_has(X86_FEATURE_NX))
 		kvm_enable_efer_bits(EFER_NX);
@@ -10319,6 +10318,9 @@ static void kvm_setup_efer_caps(void)
 	if (kvm_cpu_cap_has(X86_FEATURE_AUTOIBRS))
 		kvm_enable_efer_bits(EFER_AUTOIBRS);
 }
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_setup_efer_caps);
+
+#ifndef __PKVM_HYP__
 
 static inline void kvm_ops_update(struct kvm_x86_init_ops *ops)
 {
