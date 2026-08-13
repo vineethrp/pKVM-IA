@@ -9843,6 +9843,7 @@ __init int vmx_hardware_setup(void)
 	return 0;
 #else
 	vmx_set_cpu_caps();
+	kvm_setup_efer_caps();
 
 	return 0;
 #endif
