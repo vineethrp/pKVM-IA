@@ -2845,6 +2845,7 @@ void kvm_apic_update_apicv(struct kvm_vcpu *vcpu)
 	 *        can safely search the IRR and set irr_pending accordingly.
 	 */
 	apic->irr_pending = true;
+	apic->highest_isr_cache = -1;
 
 	/*
 	 * Update SVI when APICv gets enabled, otherwise SVI won't reflect the
@@ -2858,8 +2859,6 @@ void kvm_apic_update_apicv(struct kvm_vcpu *vcpu)
 	} else {
 		apic->isr_count = count_vectors(apic->regs + APIC_ISR);
 	}
-
-	apic->highest_isr_cache = -1;
 }
 
 int kvm_alloc_apic_access_page(struct kvm *kvm)
