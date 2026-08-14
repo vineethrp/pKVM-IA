@@ -1268,8 +1268,8 @@ EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_lmsw);
 static void kvm_load_xfeatures(struct kvm_vcpu *vcpu, bool load_guest)
 {
 #ifndef __PKVM_HYP__
-	/* The pKVM hypervisor owns protected guest xstate from first entry. */
-	if (vcpu->arch.guest_state_protected || pkvm_is_protected_vcpu(vcpu))
+	/* The pKVM hypervisor owns guest xstate from first entry. */
+	if (vcpu->arch.guest_state_protected || pkvm_enabled())
 		return;
 #endif
 
