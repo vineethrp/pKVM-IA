@@ -2557,6 +2557,7 @@ int __init intel_iommu_init(void)
 	int ret = -ENODEV;
 	struct dmar_drhd_unit *drhd;
 	struct intel_iommu *iommu;
+	bool notifier_registered = false;
 
 	/*
 	 * Intel IOMMU is required for a TXT/tboot launch or platform
@@ -2585,6 +2586,7 @@ int __init intel_iommu_init(void)
 	 * complain later when we register it under the lock.
 	 */
 	dmar_register_bus_notifier();
+	notifier_registered = true;
 
 	down_write(&dmar_global_lock);
 
@@ -2684,8 +2686,13 @@ int __init intel_iommu_init(void)
 	return 0;
 
 out_free_dmar:
-	intel_iommu_free_dmars();
+	if (!pkvm_enabled())
+		intel_iommu_free_dmars();
 	up_write(&dmar_global_lock);
+
+	if (pkvm_enabled() && notifier_registered)
+		dmar_unregister_bus_notifier();
+
 	return ret;
 }
 
