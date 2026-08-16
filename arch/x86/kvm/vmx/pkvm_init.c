@@ -10,6 +10,7 @@
 #include <asm/set_memory.h>
 #include "pkvm_constants.h"
 #include "vmx.h"
+#include "pkvm_iommu.h"
 
 extern u64 x86_pred_cmd;
 
@@ -1408,12 +1409,14 @@ static int __init pkvm_firmware_rmem_clear(void)
 
 int __init vmx_pkvm_init(void)
 {
+	bool iommu_init_attempted = false;
 	struct pkvm_hyp *pkvm;
 	int ret, cpu;
 
 	pkvm_firmware_rmem_init();
 
 	if (!enable_pkvm) {
+		/* The normal early IOMMU initialization has already run. */
 		pkvm_firmware_rmem_clear();
 		return 0;
 	}
@@ -1488,6 +1491,10 @@ int __init vmx_pkvm_init(void)
 		pr_cont("reboot with kvm-intel.pkvm_relax_cpu_bugs=false\n");
 	}
 
+	ret = pkvm_host_prepare_iommu();
+	if (ret)
+		goto out;
+
 	pkvm_sym(init_ops) = pkvm_sym(pkvm_vmx_init_ops);
 
 	pkvm_ramoops_init();
@@ -1500,6 +1507,13 @@ int __init vmx_pkvm_init(void)
 	if (ret)
 		goto repriv_cpus;
 	static_branch_enable(&pkvm_enabled_key);
+
+	iommu_init_attempted = true;
+	ret = pkvm_host_init_iommu();
+	if (ret) {
+		static_branch_disable(&pkvm_enabled_key);
+		goto repriv_cpus;
+	}
 
 	/*
 	 * After host deprivileging succeed, un-present the kernel direct
@@ -1544,6 +1558,16 @@ out:
 	 */
 	pkvm_sym(pkvm_hyp) = NULL;
 	enable_pkvm = false;
+
+	/* Restore the normal host initialization if pKVM failed early. */
+	if (!iommu_init_attempted) {
+		int iommu_ret = pkvm_host_init_iommu();
+
+		if (iommu_ret)
+			pr_err("failed to initialize host IOMMU after pKVM rollback: %d\n",
+			       iommu_ret);
+	}
+
 	return ret;
 }
 
