@@ -1410,7 +1410,7 @@ static int __init pkvm_firmware_rmem_clear(void)
 
 int __init vmx_pkvm_init(void)
 {
-	bool iommu_init_attempted = false;
+	bool iommu_initialized = false;
 	struct pkvm_hyp *pkvm;
 	int ret, cpu;
 
@@ -1509,12 +1509,12 @@ int __init vmx_pkvm_init(void)
 		goto repriv_cpus;
 	static_branch_enable(&pkvm_enabled_key);
 
-	iommu_init_attempted = true;
 	ret = pkvm_host_init_iommu();
 	if (ret) {
 		static_branch_disable(&pkvm_enabled_key);
 		goto repriv_cpus;
 	}
+	iommu_initialized = true;
 
 	/*
 	 * After host deprivileging succeed, un-present the kernel direct
@@ -1560,8 +1560,8 @@ out:
 	pkvm_sym(pkvm_hyp) = NULL;
 	enable_pkvm = false;
 
-	/* Restore the normal host initialization if pKVM failed early. */
-	if (!iommu_init_attempted) {
+	/* Restore normal host initialization after rolling pKVM back. */
+	if (!iommu_initialized) {
 		int iommu_ret = pkvm_host_init_iommu();
 
 		if (iommu_ret)

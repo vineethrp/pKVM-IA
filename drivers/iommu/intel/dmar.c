@@ -840,6 +840,11 @@ void __init dmar_register_bus_notifier(void)
 	bus_register_notifier(&pci_bus_type, &dmar_pci_bus_nb);
 }
 
+void __init dmar_unregister_bus_notifier(void)
+{
+	bus_unregister_notifier(&pci_bus_type, &dmar_pci_bus_nb);
+}
+
 
 int __init dmar_table_init(void)
 {
@@ -2025,8 +2030,12 @@ int dmar_set_interrupt(struct intel_iommu *iommu)
 	}
 
 	ret = request_irq(irq, dmar_fault, IRQF_NO_THREAD, iommu->name, iommu);
-	if (ret)
+	if (ret) {
 		pr_err("Can't request irq\n");
+		dmar_free_hwirq(irq);
+		iommu->irq = 0;
+	}
+
 	return ret;
 }
 
