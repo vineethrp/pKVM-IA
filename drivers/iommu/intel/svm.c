@@ -27,6 +27,11 @@
 
 void intel_svm_check(struct intel_iommu *iommu)
 {
+	if (pkvm_enabled()) {
+		pr_info("%s SVM disabled under pKVM\n", iommu->name);
+		return;
+	}
+
 	if (!pasid_supported(iommu) || !ecap_smpwc(iommu->ecap))
 		return;
 

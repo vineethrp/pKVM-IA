@@ -533,11 +533,19 @@ enum {
 #define sm_supported(iommu)	(intel_iommu_sm && ecap_smts((iommu)->ecap))
 #define pasid_supported(iommu)	(sm_supported(iommu) &&			\
 				 ecap_pasid((iommu)->ecap))
-#define ssads_supported(iommu) (sm_supported(iommu) &&                 \
-				ecap_slads((iommu)->ecap) &&           \
-				ecap_smpwc(iommu->ecap))
-#define nested_supported(iommu)	(sm_supported(iommu) &&			\
+#ifdef __PKVM_HYP__
+/* The protected IOMMU does not support these optional capabilities. */
+#define ssads_supported(...)	false
+#define nested_supported(...)	false
+#define prs_supported(...)	false
+#else
+#define ssads_supported(iommu)	(!pkvm_enabled() && sm_supported(iommu) && \
+				 ecap_slads((iommu)->ecap) &&		\
+				 ecap_smpwc((iommu)->ecap))
+#define nested_supported(iommu)	(!pkvm_enabled() && sm_supported(iommu) && \
 				 ecap_nest((iommu)->ecap))
+#define prs_supported(iommu)	(!pkvm_enabled() && ecap_prs((iommu)->ecap))
+#endif
 
 struct pasid_entry;
 struct pasid_state_entry;
