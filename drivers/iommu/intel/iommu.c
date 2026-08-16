@@ -1001,7 +1001,7 @@ static void free_dmar_iommu(struct intel_iommu *iommu)
 	/* free context mapping */
 	free_context_table(iommu);
 
-	if (ecap_prs(iommu->ecap))
+	if (prs_supported(iommu))
 		intel_iommu_finish_prq(iommu);
 }
 
@@ -1710,7 +1710,7 @@ static int __init init_dmars(void)
 
 		iommu_flush_write_buffer(iommu);
 
-		if (ecap_prs(iommu->ecap)) {
+		if (prs_supported(iommu)) {
 			/*
 			 * Call dmar_alloc_hwirq() with dmar_global_lock held,
 			 * could cause possible lock race condition.
@@ -2132,7 +2132,7 @@ static int intel_iommu_add(struct dmar_drhd_unit *dmaru)
 	intel_iommu_init_qi(iommu);
 	iommu_flush_write_buffer(iommu);
 
-	if (ecap_prs(iommu->ecap)) {
+	if (prs_supported(iommu)) {
 		ret = intel_iommu_enable_prq(iommu);
 		if (ret)
 			goto disable_iommu;
@@ -3280,7 +3280,7 @@ static struct iommu_device *intel_iommu_probe_device(struct device *dev)
 					info->pasid_supported = features | 1;
 			}
 
-			if (info->ats_supported && ecap_prs(iommu->ecap) &&
+			if (info->ats_supported && prs_supported(iommu) &&
 			    ecap_pds(iommu->ecap) && pci_pri_supported(pdev))
 				info->pri_supported = 1;
 		}
