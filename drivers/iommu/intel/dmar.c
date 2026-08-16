@@ -915,6 +915,11 @@ dmar_validate_one_drhd(struct acpi_dmar_header *entry, void *arg)
 	return 0;
 }
 
+static int __init intel_iommu_init_nop(void)
+{
+	return 0;
+}
+
 void __init detect_intel_iommu(void)
 {
 	int ret;
@@ -936,7 +941,8 @@ void __init detect_intel_iommu(void)
 	}
 
 	if (!ret) {
-		x86_init.iommu.iommu_init = intel_iommu_init;
+		x86_init.iommu.iommu_init = enable_pkvm ?
+						intel_iommu_init_nop : intel_iommu_init;
 		x86_platform.iommu_shutdown = intel_iommu_shutdown;
 	}
 
