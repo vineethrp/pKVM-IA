@@ -10,6 +10,8 @@
 
 static struct intel_iommu iommus[PKVM_MAX_IOMMUS];
 static unsigned int nr_iommus;
+unsigned int iommu_pgsz_mask;
+unsigned int iommu_pglvl_mask;
 
 static bool ranges_overlap(u64 start_a, u64 size_a, u64 start_b, u64 size_b)
 {
@@ -19,6 +21,11 @@ static bool ranges_overlap(u64 start_a, u64 size_a, u64 start_b, u64 size_b)
 int __init pkvm_prepare_iommus(const struct pkvm_iommu_info *infos,
 			       unsigned int count)
 {
+	unsigned int pgsz_mask = BIT(PG_LEVEL_4K) |
+				 BIT(PG_LEVEL_2M) |
+				 BIT(PG_LEVEL_1G);
+	unsigned int pglvl_mask = PKVM_IOMMU_PGT_4LEVEL |
+				  PKVM_IOMMU_PGT_5LEVEL;
 	unsigned int i, j;
 
 	if (!infos || !count || count > ARRAY_SIZE(iommus) || nr_iommus)
@@ -26,11 +33,27 @@ int __init pkvm_prepare_iommus(const struct pkvm_iommu_info *infos,
 
 	for (i = 0; i < count; i++) {
 		const struct pkvm_iommu_info *info = &infos[i];
+		unsigned int unit_pgsz_mask = BIT(PG_LEVEL_4K);
+		unsigned int unit_pglvl_mask;
 
 		if (!info->reg_phys || !PAGE_ALIGNED(info->reg_phys) ||
 		    !info->reg_size || !PAGE_ALIGNED(info->reg_size) ||
 		    info->reg_phys + info->reg_size < info->reg_phys)
 			return -EINVAL;
+
+		unit_pglvl_mask = cap_sagaw(info->cap) &
+				  (PKVM_IOMMU_PGT_4LEVEL |
+				   PKVM_IOMMU_PGT_5LEVEL);
+		if (!unit_pglvl_mask)
+			return -EOPNOTSUPP;
+
+		if (cap_super_page_val(info->cap) & BIT(0))
+			unit_pgsz_mask |= BIT(PG_LEVEL_2M);
+		if (cap_super_page_val(info->cap) & BIT(1))
+			unit_pgsz_mask |= BIT(PG_LEVEL_1G);
+
+		pglvl_mask &= unit_pglvl_mask;
+		pgsz_mask &= unit_pgsz_mask;
 
 		for (j = 0; j < i; j++) {
 			if (info->seq_id == infos[j].seq_id ||
@@ -40,6 +63,9 @@ int __init pkvm_prepare_iommus(const struct pkvm_iommu_info *infos,
 				return -EINVAL;
 		}
 	}
+
+	if (!pglvl_mask)
+		return -EOPNOTSUPP;
 
 	for (i = 0; i < count; i++) {
 		struct intel_iommu *iommu = &iommus[i];
@@ -56,6 +82,8 @@ int __init pkvm_prepare_iommus(const struct pkvm_iommu_info *infos,
 	}
 
 	nr_iommus = count;
+	iommu_pglvl_mask = pglvl_mask;
+	iommu_pgsz_mask = pgsz_mask;
 	return 0;
 }
 
