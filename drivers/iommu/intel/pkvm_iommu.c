@@ -8,6 +8,56 @@
 #include <linux/kernel.h>
 #include "iommu.h"
 
+u64 pkvm_readq(struct intel_iommu *iommu, unsigned long offset)
+{
+	union pkvm_hc_data data = {};
+	int ret;
+
+	ret = pkvm_hypercall_out(iommu_mmio_read, &data,
+				 iommu->reg_phys + offset, sizeof(u64));
+	if (ret)
+		pr_err("IOMMU MMIO read failed at %pa+%#lx: %d\n",
+		       &iommu->reg_phys, offset, ret);
+
+	return data.iommu_mmio_read.val;
+}
+
+u32 pkvm_readl(struct intel_iommu *iommu, unsigned long offset)
+{
+	union pkvm_hc_data data = {};
+	int ret;
+
+	ret = pkvm_hypercall_out(iommu_mmio_read, &data,
+				 iommu->reg_phys + offset, sizeof(u32));
+	if (ret)
+		pr_err("IOMMU MMIO read failed at %pa+%#lx: %d\n",
+		       &iommu->reg_phys, offset, ret);
+
+	return data.iommu_mmio_read.val;
+}
+
+void pkvm_writeq(struct intel_iommu *iommu, unsigned long offset, u64 val)
+{
+	int ret;
+
+	ret = pkvm_hypercall(iommu_mmio_write, iommu->reg_phys + offset,
+			     sizeof(u64), val);
+	if (ret)
+		pr_err("IOMMU MMIO write failed at %pa+%#lx: %d\n",
+		       &iommu->reg_phys, offset, ret);
+}
+
+void pkvm_writel(struct intel_iommu *iommu, unsigned long offset, u32 val)
+{
+	int ret;
+
+	ret = pkvm_hypercall(iommu_mmio_write, iommu->reg_phys + offset,
+			     sizeof(u32), val);
+	if (ret)
+		pr_err("IOMMU MMIO write failed at %pa+%#lx: %d\n",
+		       &iommu->reg_phys, offset, ret);
+}
+
 int __init pkvm_host_prepare_iommu(void)
 {
 	struct pkvm_iommu_info infos[PKVM_MAX_IOMMUS];
