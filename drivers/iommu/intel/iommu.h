@@ -689,6 +689,7 @@ struct iommu_pmu {
 #define IOMMU_IRQ_ID_OFFSET_PRQ		(DMAR_UNITS_SUPPORTED)
 #define IOMMU_IRQ_ID_OFFSET_PERF	(2 * DMAR_UNITS_SUPPORTED)
 
+#ifndef __PKVM_HYP__
 struct intel_iommu {
 	void __iomem	*reg; /* Pointer to hardware regs, virtual addr */
 	u64 		reg_phys; /* physical address of hw register set */
@@ -745,6 +746,21 @@ struct intel_iommu {
 
 	struct iommu_pmu *pmu;
 };
+#else
+struct intel_iommu {
+	void __iomem *reg;
+	u64 reg_phys;
+	u64 reg_size;
+	u64 cap;
+	u64 ecap;
+	u32 vgsts;
+	u16 segment;
+	int seq_id;
+	int agaw;
+	int msagaw;
+	pkvm_spinlock_t lock;
+};
+#endif
 
 /* PCI domain-device relationship */
 struct device_domain_info {
@@ -974,7 +990,7 @@ static inline void context_clear_entry(struct context_entry *context)
 	context->hi = 0;
 }
 
-#ifdef CONFIG_INTEL_IOMMU
+#if defined(CONFIG_INTEL_IOMMU) && !defined(__PKVM_HYP__)
 static inline bool context_copied(struct intel_iommu *iommu, u8 bus, u8 devfn)
 {
 	if (!iommu->copied_tables)
@@ -994,7 +1010,7 @@ clear_context_copied(struct intel_iommu *iommu, u8 bus, u8 devfn)
 {
 	clear_bit(((long)bus << 8) | devfn, iommu->copied_tables);
 }
-#endif /* CONFIG_INTEL_IOMMU */
+#endif /* CONFIG_INTEL_IOMMU && !__PKVM_HYP__ */
 
 /*
  * Set the RID_PASID field of a scalable mode context entry. The
@@ -1354,6 +1370,7 @@ static inline bool intel_domain_is_ss_paging(struct dmar_domain *domain)
 extern int intel_iommu_sm;
 int iommu_calculate_agaw(struct intel_iommu *iommu);
 int iommu_calculate_max_sagaw(struct intel_iommu *iommu);
+#ifndef __PKVM_HYP__
 int ecmd_submit_sync(struct intel_iommu *iommu, u8 ecmd, u64 oa, u64 ob);
 
 static inline bool ecmd_has_pmu_essential(struct intel_iommu *iommu)
@@ -1361,6 +1378,7 @@ static inline bool ecmd_has_pmu_essential(struct intel_iommu *iommu)
 	return (iommu->ecmdcap[DMA_ECMD_ECCAP3] & DMA_ECMD_ECCAP3_ESSENTIAL) ==
 		DMA_ECMD_ECCAP3_ESSENTIAL;
 }
+#endif
 
 extern int dmar_disabled;
 extern int intel_iommu_enabled;
