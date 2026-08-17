@@ -204,19 +204,26 @@ static void set_host_mem_pgstate(unsigned long phys, unsigned long size,
 	}
 }
 
-static int check_host_mem_state(unsigned long phys, unsigned long size,
-				enum pkvm_page_state state,
-				enum pkvm_owner_id owner)
+static int check_host_mem_state_mask(unsigned long phys, unsigned long size,
+				     unsigned long states,
+				     enum pkvm_owner_id owner)
 {
 	if (!is_memory_range(phys, size))
 		return -EINVAL;
 
 	for_each_pkvm_page(page, phys, size) {
-		if (page->host_state != state || page->owner != owner)
+		if (!(BIT(page->host_state) & states) || page->owner != owner)
 			return -EPERM;
 	}
 
 	return 0;
+}
+
+static int check_host_mem_state(unsigned long phys, unsigned long size,
+				enum pkvm_page_state state,
+				enum pkvm_owner_id owner)
+{
+	return check_host_mem_state_mask(phys, size, BIT(state), owner);
 }
 
 struct page_ownership {
@@ -280,9 +287,9 @@ static int check_page_owner_and_state(struct pkvm_pgtable *pgt, unsigned long va
 	return pkvm_pgtable_walk(pgt, vaddr, size, &walker);
 }
 
-static u64 host_mmu_pte_prot(bool mmio)
+static u64 host_mmu_pte_prot(bool write, bool mmio)
 {
-	return host_mmu.pgt_ops->calc_pte_perm(true, true, true) |
+	return host_mmu.pgt_ops->calc_pte_perm(true, write, true) |
 	       host_mmu.pgt_ops->calc_pte_memtype(mmio);
 }
 
@@ -352,7 +359,7 @@ static int host_mmu_map(unsigned long phys, unsigned long size, bool mmio)
 {
 	/* The vaddr == phys for the host MMU */
 	return pkvm_pgtable_map(&host_mmu, phys, phys, size,
-				host_mmu_pte_prot(mmio), NULL);
+				host_mmu_pte_prot(true, mmio), NULL);
 }
 
 static void *guest_mmu_zalloc_page(struct pkvm_memcache *mc)
@@ -571,7 +578,7 @@ static int host_reclaim_guest_walker(struct pkvm_pgtable_visit_ctx *ctx,
 		 * See also comment in pkvm_hyp_donate_host().
 		 */
 		BUG_ON(pkvm_pgtable_map(&host_mmu, phys, phys, size,
-					host_mmu_pte_prot(false), NULL));
+					host_mmu_pte_prot(true, false), NULL));
 
 		for_each_pkvm_page(page, phys, size) {
 			BUG_ON(page->host_share_hyp_count);
@@ -716,7 +723,7 @@ static int __guest_share_host(unsigned long gpa, unsigned long hpa,
 				&vcpu->arch.pkvm.guest_mmu_memcache));
 
 	BUG_ON(pkvm_pgtable_map(&host_mmu, hpa, hpa, size,
-				host_mmu_pte_prot(false), NULL));
+				host_mmu_pte_prot(true, false), NULL));
 	set_host_mem_pgstate(hpa, size, PKVM_PAGE_SHARED_BORROWED,
 			     PKVM_ID_GUEST);
 
@@ -1077,6 +1084,49 @@ unlock:
 }
 
 /**
+ * pkvm_host_donate_hyp_share_ro() - Donate host memory to the hypervisor and
+ *                                    retain a read-only host mapping.
+ * @phys: Physical address of the memory region to donate.
+ * @size: Size of the memory region to donate.
+ * @clear: If true, clear the memory region after donating.
+ *
+ * Transfer ownership of [@phys, @phys + @size) from the host to the
+ * hypervisor while retaining a read-only host mapping. The physical address
+ * and size must be page aligned and the size must be nonzero.
+ *
+ * Return: 0 on success, or a negative error code on failure.
+ */
+int pkvm_host_donate_hyp_share_ro(unsigned long phys, unsigned long size,
+				  bool clear)
+{
+	u64 prot = host_mmu_pte_prot(false, false);
+	int ret;
+
+	if (!is_valid_addr_range(phys, size, true))
+		return -EINVAL;
+
+	pkvm_host_mmu_lock();
+
+	ret = check_host_mem_state(phys, size, PKVM_PAGE_OWNED, PKVM_ID_HOST);
+	if (ret)
+		goto unlock;
+
+	ret = pkvm_pgtable_map(&host_mmu, phys, phys, size, prot, NULL);
+	if (WARN_ON_ONCE(ret))
+		goto unlock;
+
+	set_host_mem_pgstate(phys, size, PKVM_PAGE_SHARED_BORROWED,
+			     PKVM_ID_HYP);
+unlock:
+	pkvm_host_mmu_unlock();
+
+	if (!ret && clear)
+		memset(__pkvm_va(phys), 0, size);
+
+	return ret;
+}
+
+/**
  * pkvm_hyp_donate_host() - Donate memory pages from hypervisor to host.
  * @phys:	Physical address of the memory region to donate.
  * @size:	Size of the memory region to donate.
@@ -1094,6 +1144,8 @@ unlock:
  */
 void pkvm_hyp_donate_host(unsigned long phys, unsigned long size, bool clear)
 {
+	unsigned long states = BIT(PKVM_PAGE_NONE) |
+			       BIT(PKVM_PAGE_SHARED_BORROWED);
 	void *va = __pkvm_va(phys);
 	int ret;
 
@@ -1107,7 +1159,7 @@ void pkvm_hyp_donate_host(unsigned long phys, unsigned long size, bool clear)
 
 	pkvm_host_mmu_lock();
 
-	ret = check_host_mem_state(phys, size, PKVM_PAGE_NONE, PKVM_ID_HYP);
+	ret = check_host_mem_state_mask(phys, size, states, PKVM_ID_HYP);
 	if (ret)
 		goto unlock;
 
@@ -1120,7 +1172,7 @@ void pkvm_hyp_donate_host(unsigned long phys, unsigned long size, bool clear)
 	 * behavior. So panic if it fails.
 	 */
 	BUG_ON(ret = pkvm_pgtable_map(&host_mmu, phys, phys, size,
-				      host_mmu_pte_prot(false), NULL));
+				      host_mmu_pte_prot(true, false), NULL));
 
 	set_host_mem_pgstate(phys, size, PKVM_PAGE_OWNED, PKVM_ID_HOST);
 unlock:
@@ -1159,7 +1211,7 @@ out:
 int pkvm_hyp_donate_host_mmio_locked(unsigned long phys, unsigned long size)
 {
 	u64 prot = host_mmu.pgt_ops->pte_mk_pgstate(PKVM_PAGE_OWNED) |
-		   host_mmu_pte_prot(true);
+		   host_mmu_pte_prot(true, true);
 	int ret;
 
 	if (!is_valid_addr_range(phys, size, true))
