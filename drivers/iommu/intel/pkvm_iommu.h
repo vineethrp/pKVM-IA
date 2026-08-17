@@ -36,6 +36,13 @@ PKVM_DECLARE(int, pkvm_prepare_iommus,
 	     (const struct pkvm_iommu_info *infos, unsigned int nr_iommus));
 
 #ifndef __PKVM_HYP__
+struct intel_iommu;
+
+u64 pkvm_readq(struct intel_iommu *iommu, unsigned long offset);
+u32 pkvm_readl(struct intel_iommu *iommu, unsigned long offset);
+void pkvm_writeq(struct intel_iommu *iommu, unsigned long offset, u64 val);
+void pkvm_writel(struct intel_iommu *iommu, unsigned long offset, u32 val);
+
 int __init pkvm_host_prepare_iommu(void);
 int __init pkvm_host_init_iommu(void);
 #else

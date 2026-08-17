@@ -765,24 +765,44 @@ struct intel_iommu {
 static inline u64 dmar_readq(struct intel_iommu *iommu,
 			     unsigned long offset)
 {
+#if defined(CONFIG_PKVM_INTEL) && !defined(__PKVM_HYP__)
+	if (pkvm_enabled())
+		return pkvm_readq(iommu, offset);
+#endif
 	return readq(iommu->reg + offset);
 }
 
 static inline void dmar_writeq(struct intel_iommu *iommu,
 			       unsigned long offset, u64 val)
 {
+#if defined(CONFIG_PKVM_INTEL) && !defined(__PKVM_HYP__)
+	if (pkvm_enabled()) {
+		pkvm_writeq(iommu, offset, val);
+		return;
+	}
+#endif
 	writeq(val, iommu->reg + offset);
 }
 
 static inline u32 dmar_readl(struct intel_iommu *iommu,
 			     unsigned long offset)
 {
+#if defined(CONFIG_PKVM_INTEL) && !defined(__PKVM_HYP__)
+	if (pkvm_enabled())
+		return pkvm_readl(iommu, offset);
+#endif
 	return readl(iommu->reg + offset);
 }
 
 static inline void dmar_writel(struct intel_iommu *iommu,
 			       unsigned long offset, u32 val)
 {
+#if defined(CONFIG_PKVM_INTEL) && !defined(__PKVM_HYP__)
+	if (pkvm_enabled()) {
+		pkvm_writel(iommu, offset, val);
+		return;
+	}
+#endif
 	writel(val, iommu->reg + offset);
 }
 
