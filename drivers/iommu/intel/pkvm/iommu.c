@@ -13,6 +13,16 @@ static unsigned int nr_iommus;
 unsigned int iommu_pgsz_mask;
 unsigned int iommu_pglvl_mask;
 
+/* GCMD bits that enable or disable IOMMU features. */
+#define DMAR_GSTS_EN_BITS	(DMA_GCMD_TE | DMA_GCMD_QIE | \
+				 DMA_GCMD_IRE | DMA_GCMD_CFI)
+/* One-shot GCMD bits that have no effect when cleared. */
+#define DMAR_GCMD_ONESHOT	(DMA_GCMD_SRTP | DMA_GCMD_SIRTP)
+/* GCMD bits that may pass directly through to hardware. */
+#define DMAR_GCMD_DIRECT	(DMAR_GSTS_EN_BITS | DMAR_GCMD_ONESHOT)
+/* GCMD bits currently understood by pKVM. */
+#define DMAR_GCMD_SUPPORTED	(DMAR_GSTS_EN_BITS | DMAR_GCMD_ONESHOT)
+
 static struct intel_iommu *iommu_from_phys(u64 phys)
 {
 	unsigned int i;
@@ -70,6 +80,63 @@ static int iommu_direct_mmio_write(struct intel_iommu *iommu, u64 phys,
 	return 0;
 }
 
+static u32 pkvm_dmar_readl(struct intel_iommu *iommu, unsigned long offset)
+{
+	return readl(iommu->reg + offset);
+}
+
+static int handle_gcmd_direct(struct intel_iommu *iommu, u32 bit, bool set)
+{
+	u32 gcmd = iommu->vgsts & DMAR_GSTS_EN_BITS;
+	u32 status;
+
+	if ((bit & DMAR_GCMD_ONESHOT) && !set)
+		return -EINVAL;
+
+	if (set)
+		gcmd |= bit;
+	else
+		gcmd &= ~bit;
+
+	writel(gcmd, iommu->reg + DMAR_GCMD_REG);
+	IOMMU_WAIT_OP(iommu, DMAR_GSTS_REG, pkvm_dmar_readl,
+		      (!!(status & bit) == set), status);
+	iommu->vgsts = (iommu->vgsts & DMAR_GCMD_ONESHOT) | gcmd;
+
+	return 0;
+}
+
+static int handle_global_cmd(struct intel_iommu *iommu, u32 val)
+{
+	u32 changed = (iommu->vgsts & DMAR_GSTS_EN_BITS) ^ val;
+
+	if (!changed)
+		return 0;
+
+	if (hweight32(changed) > 1) {
+		pkvm_warn("iommu%d: multiple GCMD bits changed: %#x\n",
+			  iommu->seq_id, val);
+		return -EINVAL;
+	}
+
+	if (changed & ~DMAR_GCMD_SUPPORTED) {
+		pkvm_warn("iommu%d: unsupported GCMD bit: %#x\n",
+			  iommu->seq_id, changed);
+		return -EOPNOTSUPP;
+	}
+
+	pkvm_dbg("iommu%d: GCMD=%#x GSTS=%#x changed=%#x\n",
+		 iommu->seq_id, val, iommu->vgsts, changed);
+
+	if (changed & ~DMAR_GCMD_DIRECT) {
+		pkvm_warn("iommu%d: direct GCMD access denied: %#x (set=%d)\n",
+			  iommu->seq_id, changed, !!(val & changed));
+		return -EPERM;
+	}
+
+	return handle_gcmd_direct(iommu, changed, !!(val & changed));
+}
+
 int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 {
 	struct intel_iommu *iommu = iommu_from_phys(phys);
@@ -118,6 +185,9 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 	case DMAR_ECAP_REG:
 	case DMAR_GSTS_REG:
 		ret = -EINVAL;
+		break;
+	case DMAR_GCMD_REG:
+		ret = handle_global_cmd(iommu, val);
 		break;
 	default:
 		/* Registers not emulated by pKVM pass through to hardware. */
