@@ -1199,7 +1199,6 @@ static void free_iommu(struct intel_iommu *iommu)
 
 	if (iommu->qi) {
 		iommu_free_pages(iommu->qi->desc);
-		kfree(iommu->qi->desc_status);
 		kfree(iommu->qi);
 	}
 
@@ -1691,7 +1690,7 @@ int dmar_enable_qi(struct intel_iommu *iommu)
 	if (iommu->qi)
 		return 0;
 
-	iommu->qi = kmalloc_obj(*qi, GFP_ATOMIC);
+	iommu->qi = kzalloc_obj(*qi, GFP_ATOMIC);
 	if (!iommu->qi)
 		return -ENOMEM;
 
@@ -1711,14 +1710,6 @@ int dmar_enable_qi(struct intel_iommu *iommu)
 	}
 
 	qi->desc = desc;
-
-	qi->desc_status = kzalloc_objs(int, QI_LENGTH, GFP_ATOMIC);
-	if (!qi->desc_status) {
-		iommu_free_pages(qi->desc);
-		kfree(qi);
-		iommu->qi = NULL;
-		return -ENOMEM;
-	}
 
 	raw_spin_lock_init(&qi->q_lock);
 
