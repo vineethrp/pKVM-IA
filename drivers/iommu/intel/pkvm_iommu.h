@@ -10,6 +10,10 @@
 #include <asm/kvm_pkvm.h>
 #endif
 
+#ifdef __PKVM_HYP__
+#include <asm/pkvm_spinlock.h>
+#endif
+
 #define PKVM_MAX_IOMMUS	16
 #define PKVM_MAX_SATC_DEVS	16
 

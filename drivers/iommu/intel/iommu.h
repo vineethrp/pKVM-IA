@@ -607,6 +607,17 @@ struct qi_batch {
 	unsigned int index;
 };
 
+#ifdef __PKVM_HYP__
+/*
+ * Temporary domain view used while context and PASID ownership is moved to
+ * the hypervisor. The protected domain registry replaces this later.
+ */
+struct dmar_domain {
+	phys_addr_t root_pa;
+	u8 agaw;
+	u8 use_first_level:1;
+};
+#else
 struct dmar_domain {
 	union {
 		struct iommu_domain domain;
@@ -662,6 +673,7 @@ struct dmar_domain {
 PT_IOMMU_CHECK_DOMAIN(struct dmar_domain, iommu, domain);
 PT_IOMMU_CHECK_DOMAIN(struct dmar_domain, sspt.iommu, domain);
 PT_IOMMU_CHECK_DOMAIN(struct dmar_domain, fspt.iommu, domain);
+#endif /* __PKVM_HYP__ */
 
 /*
  * In theory, the VT-d 4.0 spec can support up to 2 ^ 16 counters.
@@ -773,8 +785,19 @@ struct intel_iommu {
 	struct q_inval *qi;
 	struct iommu_flush flush;
 	struct root_entry *root_entry;
+	/* Page supplied by the host for a new context or PASID table. */
+	void *donation_page;
 	pkvm_spinlock_t lock;
 };
+
+/* The caller must hold iommu->lock. */
+static inline void *pkvm_iommu_donation_page(struct intel_iommu *iommu)
+{
+	void *donation_page = iommu->donation_page;
+
+	iommu->donation_page = NULL;
+	return donation_page;
+}
 #endif
 
 static inline u64 dmar_readq(struct intel_iommu *iommu,
@@ -822,6 +845,7 @@ static inline void dmar_writel(struct intel_iommu *iommu,
 }
 
 /* PCI domain-device relationship */
+#ifndef __PKVM_HYP__
 struct device_domain_info {
 	struct list_head link;	/* link to domain siblings */
 	u32 segment;		/* PCI segment number */
@@ -857,6 +881,17 @@ struct dev_pasid_info {
 	struct dentry *debugfs_dentry; /* pointer to pasid directory dentry */
 #endif
 };
+#else
+struct device_domain_info {
+	u8 bus;
+	u8 devfn;
+	u16 pfsid;
+	u8 ats_supported:1;
+	u8 ats_enabled:1;
+	u8 ats_qdep;
+	struct intel_iommu *iommu;
+};
+#endif /* !__PKVM_HYP__ */
 
 static inline void __iommu_flush_cache(
 	struct intel_iommu *iommu, void *addr, int size)
@@ -865,11 +900,13 @@ static inline void __iommu_flush_cache(
 		clflush_cache_range(addr, size);
 }
 
+#ifndef __PKVM_HYP__
 /* Convert generic struct iommu_domain to private struct dmar_domain */
 static inline struct dmar_domain *to_dmar_domain(struct iommu_domain *dom)
 {
 	return container_of(dom, struct dmar_domain, domain);
 }
+#endif /* !__PKVM_HYP__ */
 
 /*
  * Domain ID 0 and 1 are reserved:
@@ -889,6 +926,7 @@ static inline struct dmar_domain *to_dmar_domain(struct iommu_domain *dom)
 #define FLPT_DEFAULT_DID		1
 #define IDA_START_DID			2
 
+#ifndef __PKVM_HYP__
 /* Retrieve the domain ID which has allocated to the domain */
 static inline u16
 domain_id_iommu(struct dmar_domain *domain, struct intel_iommu *iommu)
@@ -907,6 +945,7 @@ iommu_domain_did(struct iommu_domain *domain, struct intel_iommu *iommu)
 		return FLPT_DEFAULT_DID;
 	return domain_id_iommu(to_dmar_domain(domain), iommu);
 }
+#endif /* !__PKVM_HYP__ */
 
 static inline bool dev_is_real_dma_subdevice(struct device *dev)
 {
@@ -1048,6 +1087,12 @@ static inline void context_clear_entry(struct context_entry *context)
 	context->lo = 0;
 	context->hi = 0;
 }
+
+#ifdef __PKVM_HYP__
+int domain_context_mapping_one(struct dmar_domain *domain,
+			       struct device_domain_info *info,
+			       u16 did);
+#endif
 
 #if defined(CONFIG_INTEL_IOMMU) && !defined(__PKVM_HYP__)
 static inline bool context_copied(struct intel_iommu *iommu, u8 bus, u8 devfn)
@@ -1327,6 +1372,7 @@ void cache_tag_flush_range_np(struct dmar_domain *domain, unsigned long start,
 void intel_context_flush_no_pasid(struct device_domain_info *info,
 				  struct context_entry *context, u16 did);
 
+#ifndef __PKVM_HYP__
 int intel_iommu_enable_prq(struct intel_iommu *iommu);
 int intel_iommu_finish_prq(struct intel_iommu *iommu);
 void intel_iommu_page_response(struct device *dev, struct iopf_fault *evt,
@@ -1368,6 +1414,7 @@ static inline int iopf_for_domain_replace(struct iommu_domain *new,
 
 	return 0;
 }
+#endif /* !__PKVM_HYP__ */
 
 #ifdef CONFIG_INTEL_IOMMU_SVM
 void intel_svm_check(struct intel_iommu *iommu);
@@ -1400,19 +1447,27 @@ extern const struct attribute_group *intel_iommu_groups[];
 struct context_entry *iommu_context_addr(struct intel_iommu *iommu, u8 bus,
 					 u8 devfn, int alloc);
 
+#ifndef __PKVM_HYP__
 extern const struct iommu_ops intel_iommu_ops;
 extern const struct iommu_domain_ops intel_fs_paging_domain_ops;
 extern const struct iommu_domain_ops intel_ss_paging_domain_ops;
+#endif
 
 static inline bool intel_domain_is_fs_paging(struct dmar_domain *domain)
 {
+#ifndef __PKVM_HYP__
 	return domain->domain.ops == &intel_fs_paging_domain_ops;
+#else
+	return domain->use_first_level;
+#endif
 }
 
+#ifndef __PKVM_HYP__
 static inline bool intel_domain_is_ss_paging(struct dmar_domain *domain)
 {
 	return domain->domain.ops == &intel_ss_paging_domain_ops;
 }
+#endif /* !__PKVM_HYP__ */
 
 #ifdef CONFIG_INTEL_IOMMU
 extern int intel_iommu_sm;

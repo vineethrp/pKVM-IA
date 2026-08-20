@@ -31,6 +31,18 @@
 #include "pasid.h"
 #include "perfmon.h"
 
+#ifdef __PKVM_HYP__
+#include "pkvm/memory.h"
+#undef phys_to_virt
+#define phys_to_virt __pkvm_va
+#undef virt_to_phys
+#define virt_to_phys __pkvm_pa
+#undef spin_lock
+#define spin_lock pkvm_spin_lock
+#undef spin_unlock
+#define spin_unlock pkvm_spin_unlock
+#endif
+
 #define ROOT_SIZE		VTD_PAGE_SIZE
 #define CONTEXT_SIZE		VTD_PAGE_SIZE
 
@@ -45,6 +57,7 @@
 
 #define DEFAULT_DOMAIN_ADDRESS_WIDTH 57
 
+#ifndef __PKVM_HYP__
 static void __init check_tylersburg_isoch(void);
 static int intel_iommu_set_dirty_tracking(struct iommu_domain *domain,
 					  bool enable);
@@ -337,6 +350,7 @@ static bool iommu_paging_structure_coherency(struct intel_iommu *iommu)
 	return sm_supported(iommu) ?
 			ecap_smpwc(iommu->ecap) : ecap_coherent(iommu->ecap);
 }
+#endif /* !__PKVM_HYP__ */
 
 struct context_entry *iommu_context_addr(struct intel_iommu *iommu, u8 bus,
 					 u8 devfn, int alloc)
@@ -349,8 +363,10 @@ struct context_entry *iommu_context_addr(struct intel_iommu *iommu, u8 bus,
 	 * Except that the caller requested to allocate a new entry,
 	 * returning a copied context entry makes no sense.
 	 */
+#ifndef __PKVM_HYP__
 	if (!alloc && context_copied(iommu, bus, devfn))
 		return NULL;
+#endif
 
 	entry = &root->lo;
 	if (sm_supported(iommu)) {
@@ -367,8 +383,12 @@ struct context_entry *iommu_context_addr(struct intel_iommu *iommu, u8 bus,
 		if (!alloc)
 			return NULL;
 
+#ifndef __PKVM_HYP__
 		context = iommu_alloc_pages_node_sz(iommu->node, GFP_ATOMIC,
 						    SZ_4K);
+#else
+		context = pkvm_iommu_donation_page(iommu);
+#endif
 		if (!context)
 			return NULL;
 
@@ -379,6 +399,8 @@ struct context_entry *iommu_context_addr(struct intel_iommu *iommu, u8 bus,
 	}
 	return &context[devfn];
 }
+
+#ifndef __PKVM_HYP__
 
 /**
  * is_downstream_to_pci_bridge - test if a device belongs to the PCI
@@ -723,9 +745,11 @@ static void iommu_set_root_entry(struct intel_iommu *iommu)
 		qi_flush_pasid_cache(iommu, 0, QI_PC_GLOBAL, 0);
 	iommu->flush.flush_iotlb(iommu, 0, 0, 0, DMA_TLB_GLOBAL_FLUSH);
 }
+#endif /* !__PKVM_HYP__ */
 
 void iommu_flush_write_buffer(struct intel_iommu *iommu)
 {
+#ifndef __PKVM_HYP__
 	u32 val;
 	unsigned long flag;
 
@@ -740,8 +764,13 @@ void iommu_flush_write_buffer(struct intel_iommu *iommu)
 		      dmar_readl, (!(val & DMA_GSTS_WBFS)), val);
 
 	raw_spin_unlock_irqrestore(&iommu->register_lock, flag);
+#else
+	/* pKVM initialization rejects IOMMUs that require this flush. */
+	return;
+#endif
 }
 
+#ifndef __PKVM_HYP__
 /* return value determine if we need a write buffer flush */
 static void __iommu_flush_context(struct intel_iommu *iommu,
 				  u16 did, u16 source_id, u8 function_mask,
@@ -1125,6 +1154,7 @@ static void copied_context_tear_down(struct intel_iommu *iommu,
 
 	clear_context_copied(iommu, bus, devfn);
 }
+#endif /* !__PKVM_HYP__ */
 
 /*
  * It's a non-present to present mapping. If hardware doesn't cache
@@ -1146,25 +1176,48 @@ static void context_present_cache_flush(struct intel_iommu *iommu, u16 did,
 	}
 }
 
+#ifdef __PKVM_HYP__
+int domain_context_mapping_one(struct dmar_domain *domain,
+			       struct device_domain_info *info,
+			       u16 did)
+#else
 static int domain_context_mapping_one(struct dmar_domain *domain,
 				      struct intel_iommu *iommu,
 				      u8 bus, u8 devfn)
+#endif
 {
+#ifdef __PKVM_HYP__
+	struct intel_iommu *iommu = info->iommu;
+	u8 bus = info->bus;
+	u8 devfn = info->devfn;
+#else
 	struct device_domain_info *info =
 			domain_lookup_dev_info(domain, iommu, bus, devfn);
 	u16 did = domain_id_iommu(domain, iommu);
-	int translation = CONTEXT_TT_MULTI_LEVEL;
 	struct pt_iommu_vtdss_hw_info pt_info;
+#endif
+	int translation = CONTEXT_TT_MULTI_LEVEL;
 	struct context_entry *context;
+	unsigned long root;
+	u8 agaw;
 	int ret;
 
+#ifndef __PKVM_HYP__
 	if (WARN_ON(!intel_domain_is_ss_paging(domain)))
 		return -EINVAL;
 
 	pt_iommu_vtdss_hw_info(&domain->sspt, &pt_info);
+	root = pt_info.ssptptr;
+	agaw = pt_info.aw;
 
 	pr_debug("Set context mapping for %02x:%02x.%d\n",
 		bus, PCI_SLOT(devfn), PCI_FUNC(devfn));
+#else
+	root = domain->root_pa;
+	agaw = domain->agaw;
+	if (intel_domain_is_fs_paging(domain))
+		return -EINVAL;
+#endif
 
 	spin_lock(&iommu->lock);
 	ret = -ENOMEM;
@@ -1173,10 +1226,15 @@ static int domain_context_mapping_one(struct dmar_domain *domain,
 		goto out_unlock;
 
 	ret = 0;
+#ifdef __PKVM_HYP__
+	if (context_present(context))
+		goto out_unlock;
+#else
 	if (context_present(context) && !context_copied(iommu, bus, devfn))
 		goto out_unlock;
 
 	copied_context_tear_down(iommu, context, bus, devfn);
+#endif
 	context_clear_entry(context);
 	context_set_domain_id(context, did);
 
@@ -1184,9 +1242,8 @@ static int domain_context_mapping_one(struct dmar_domain *domain,
 		translation = CONTEXT_TT_DEV_IOTLB;
 	else
 		translation = CONTEXT_TT_MULTI_LEVEL;
-
-	context_set_address_root(context, pt_info.ssptptr);
-	context_set_address_width(context, pt_info.aw);
+	context_set_address_root(context, root);
+	context_set_address_width(context, agaw);
 	context_set_translation_type(context, translation);
 	context_set_fault_enable(context);
 	context_set_present(context);
@@ -1201,6 +1258,7 @@ out_unlock:
 	return ret;
 }
 
+#ifndef __PKVM_HYP__
 static int domain_context_mapping_cb(struct pci_dev *pdev,
 				     u16 alias, void *opaque)
 {
@@ -1232,8 +1290,10 @@ domain_context_mapping(struct dmar_domain *domain, struct device *dev)
 
 	return 0;
 }
+#endif /* !__PKVM_HYP__ */
 
-static void domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
+static __maybe_unused void
+domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
 {
 	struct intel_iommu *iommu = info->iommu;
 	struct context_entry *context;
@@ -1255,6 +1315,7 @@ static void domain_context_clear_one(struct device_domain_info *info, u8 bus, u8
 	__iommu_flush_cache(iommu, context, sizeof(*context));
 }
 
+#ifndef __PKVM_HYP__
 int __domain_setup_first_level(struct intel_iommu *iommu, struct device *dev,
 			       ioasid_t pasid, u16 did, phys_addr_t fsptptr,
 			       int flags, struct iommu_domain *old)
@@ -4309,3 +4370,4 @@ err:
 }
 
 MODULE_IMPORT_NS("GENERIC_PT_IOMMU");
+#endif /* !__PKVM_HYP__ */
