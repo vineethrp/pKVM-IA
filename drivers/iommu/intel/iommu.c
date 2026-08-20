@@ -2307,7 +2307,7 @@ static bool dmar_ats_supported(struct pci_dev *dev, struct intel_iommu *iommu)
 
 	dev = pci_physfn(dev);
 	satcu = dmar_find_matched_satc_unit(dev);
-	if (satcu)
+	if (satcu) {
 		/*
 		 * This device supports ATS as it is in SATC table.
 		 * When IOMMU is in legacy mode, enabling ATS is done
@@ -2316,6 +2316,13 @@ static bool dmar_ats_supported(struct pci_dev *dev, struct intel_iommu *iommu)
 		 * to avoid duplicated TLB invalidation.
 		 */
 		return !(satcu->atc_required && !sm_supported(iommu));
+	} else if (pkvm_enabled()) {
+		/*
+		 * pKVM does not allow ATS for devices outside SATC, so do not
+		 * advertise ATS support for them.
+		 */
+		return false;
+	}
 
 	for (bus = dev->bus; bus; bus = bus->parent) {
 		bridge = bus->self;
