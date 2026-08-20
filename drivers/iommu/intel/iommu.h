@@ -476,7 +476,11 @@ struct qi_desc {
 };
 
 struct q_inval {
+#ifndef __PKVM_HYP__
 	raw_spinlock_t  q_lock;
+#else
+	pkvm_spinlock_t q_lock;
+#endif
 	void		*desc;          /* invalidation queue */
 	int             desc_status[QI_LENGTH]; /* desc status */
 	int             free_head;      /* first free entry */
@@ -754,10 +758,13 @@ struct intel_iommu {
 	u64 cap;
 	u64 ecap;
 	u32 vgsts;
+	u64 viqa;
 	u16 segment;
 	int seq_id;
 	int agaw;
 	int msagaw;
+	struct q_inval _qi;
+	struct q_inval *qi;
 	pkvm_spinlock_t lock;
 };
 #endif

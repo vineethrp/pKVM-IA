@@ -19,7 +19,8 @@ unsigned int iommu_pglvl_mask;
 /* One-shot GCMD bits that have no effect when cleared. */
 #define DMAR_GCMD_ONESHOT	(DMA_GCMD_SRTP | DMA_GCMD_SIRTP)
 /* GCMD bits that may pass directly through to hardware. */
-#define DMAR_GCMD_DIRECT	(DMAR_GSTS_EN_BITS | DMAR_GCMD_ONESHOT)
+#define DMAR_GCMD_DIRECT	(DMA_GCMD_TE | DMA_GCMD_IRE | DMA_GCMD_CFI | \
+				 DMAR_GCMD_ONESHOT)
 /* GCMD bits currently understood by pKVM. */
 #define DMAR_GCMD_SUPPORTED	(DMAR_GSTS_EN_BITS | DMAR_GCMD_ONESHOT)
 
@@ -106,6 +107,70 @@ static int handle_gcmd_direct(struct intel_iommu *iommu, u32 bit, bool set)
 	return 0;
 }
 
+static int initialize_qi(struct intel_iommu *iommu)
+{
+	struct q_inval *qi = iommu->qi;
+	u64 val = __pkvm_pa(qi->desc);
+
+	/*
+	 * TODO: Write-protect the QI descriptor page once the hypervisor takes
+	 * over all QI operations.
+	 */
+
+	pkvm_spin_lock_init(&qi->q_lock);
+	qi->free_head = 0;
+	qi->free_tail = 0;
+	qi->free_cnt = QI_LENGTH;
+
+	/*
+	 * Set DW=1 and QS=1 in IQA_REG when Scalable Mode capability
+	 * is present.
+	 */
+	if (ecap_smts(iommu->ecap))
+		val |= BIT_ULL(11) | BIT_ULL(0);
+
+	/* Write zero to the tail register and program the queue address. */
+	writel(0, iommu->reg + DMAR_IQT_REG);
+	writeq(val, iommu->reg + DMAR_IQA_REG);
+
+	return handle_gcmd_direct(iommu, DMA_GCMD_QIE, true);
+}
+
+static int handle_gcmd_qie(struct intel_iommu *iommu, bool enable)
+{
+	int ret = 0;
+
+	if (enable) {
+		if (iommu->qi || iommu->vgsts & DMA_GSTS_QIES) {
+			pkvm_err("iommu%d: QI already enabled\n", iommu->seq_id);
+			return -EBUSY;
+		} else if (!iommu->viqa) {
+			pkvm_err("iommu%d: QIE before setting IQA\n",
+				 iommu->seq_id);
+			return -EINVAL;
+		}
+
+		/*
+		 * The host dynamically allocates iommu->qi, but pKVM embeds the
+		 * structure. Point qi at the embedded instance both to reuse the
+		 * host representation and to record that QI has been initialized.
+		 */
+		iommu->qi = &iommu->_qi;
+		iommu->qi->desc =
+			pkvm_host_gpa_to_virt(iommu->viqa & VTD_PAGE_MASK);
+		ret = initialize_qi(iommu);
+	} else {
+		if (!iommu->qi)
+			ret = handle_gcmd_direct(iommu, DMA_GCMD_QIE, false);
+		else
+			iommu->vgsts &= ~DMA_GSTS_QIES;
+	}
+
+	pkvm_dbg("iommu%d: Queued invalidation %s\n", iommu->seq_id,
+		 enable ? "enabled" : "disabled");
+	return ret;
+}
+
 static int handle_global_cmd(struct intel_iommu *iommu, u32 val)
 {
 	u32 changed = (iommu->vgsts & DMAR_GSTS_EN_BITS) ^ val;
@@ -127,6 +192,9 @@ static int handle_global_cmd(struct intel_iommu *iommu, u32 val)
 
 	pkvm_dbg("iommu%d: GCMD=%#x GSTS=%#x changed=%#x\n",
 		 iommu->seq_id, val, iommu->vgsts, changed);
+
+	if (changed & DMA_GCMD_QIE)
+		return handle_gcmd_qie(iommu, !!(val & DMA_GCMD_QIE));
 
 	if (changed & ~DMAR_GCMD_DIRECT) {
 		pkvm_warn("iommu%d: direct GCMD access denied: %#x (set=%d)\n",
@@ -159,6 +227,9 @@ int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 	case DMAR_ECAP_REG:
 		*val = iommu->ecap;
 		break;
+	case DMAR_IQA_REG:
+		*val = iommu->viqa;
+		break;
 	default:
 		/* Registers not emulated by pKVM pass through to hardware. */
 		ret = iommu_direct_mmio_read(iommu, phys, len, val);
@@ -188,6 +259,15 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 		break;
 	case DMAR_GCMD_REG:
 		ret = handle_global_cmd(iommu, val);
+		break;
+	case DMAR_IQA_REG:
+		if (iommu->viqa) {
+			pkvm_err("iommu%d: IQA set more than once\n",
+				 iommu->seq_id);
+			ret = -EINVAL;
+		} else {
+			iommu->viqa = val;
+		}
 		break;
 	default:
 		/* Registers not emulated by pKVM pass through to hardware. */
