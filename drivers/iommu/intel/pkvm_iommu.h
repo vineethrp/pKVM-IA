@@ -12,10 +12,13 @@
 
 #ifdef __PKVM_HYP__
 #include <asm/pkvm_spinlock.h>
+#include <linux/atomic.h>
+#include <linux/list.h>
 #endif
 
 #define PKVM_MAX_IOMMUS	16
 #define PKVM_MAX_SATC_DEVS	16
+#define PKVM_MAX_IOMMU_DOMAINS	128
 #define PKVM_MAX_IOMMU_DEVICES	256
 
 /* Page-table levels represented by the IOMMU SAGAW capability. */
@@ -41,6 +44,7 @@ struct pkvm_iommu_device_id {
 
 struct qi_desc;
 struct intel_iommu;
+struct dmar_domain;
 struct device_domain_info;
 struct pkvm_device;
 
@@ -116,6 +120,13 @@ static inline bool is_iommu_mmio(u64 phys)
 bool overlaps_iommu_mmio(u64 phys, u64 size);
 bool is_dev_in_satc(u16 segment, u16 bdf);
 
+struct dmar_domain *
+pkvm_alloc_iommu_domain(phys_addr_t root, u8 agaw, bool use_first_level);
+struct dmar_domain *
+pkvm_get_iommu_domain(phys_addr_t root, u16 did,
+		      struct intel_iommu *iommu);
+void pkvm_put_iommu_domain(struct dmar_domain *domain);
+int pkvm_free_iommu_domain(phys_addr_t root);
 struct pkvm_device *
 pkvm_alloc_iommu_device(const struct device_domain_info *info);
 struct pkvm_device *
