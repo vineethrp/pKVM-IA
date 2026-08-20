@@ -478,7 +478,7 @@ struct qi_desc {
 struct q_inval {
 	raw_spinlock_t  q_lock;
 	void		*desc;          /* invalidation queue */
-	int             *desc_status;   /* desc status */
+	int             desc_status[QI_LENGTH]; /* desc status */
 	int             free_head;      /* first free entry */
 	int             free_tail;      /* last free entry */
 	int             free_cnt;
