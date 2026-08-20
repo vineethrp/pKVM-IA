@@ -608,14 +608,14 @@ struct qi_batch {
 };
 
 #ifdef __PKVM_HYP__
-/*
- * Temporary domain view used while context and PASID ownership is moved to
- * the hypervisor. The protected domain registry replaces this later.
- */
 struct dmar_domain {
 	phys_addr_t root_pa;
 	u8 agaw;
 	u8 use_first_level:1;
+	atomic_t refcount;
+	unsigned int index;
+	struct hlist_node hnode;
+	pkvm_spinlock_t lock;
 };
 #else
 struct dmar_domain {
