@@ -179,6 +179,17 @@ int pkvm_qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
 	return ret;
 }
 
+int pkvm_alloc_domain(void *root, u8 agaw, bool use_first_level)
+{
+	return pkvm_hypercall(iommu_alloc_domain, virt_to_phys(root), agaw,
+			      use_first_level);
+}
+
+int pkvm_free_domain(void *root)
+{
+	return pkvm_hypercall(iommu_free_domain, virt_to_phys(root));
+}
+
 int pkvm_context_mapping(struct intel_iommu *iommu,
 			 struct device_domain_info *info, u8 bus, u8 devfn,
 			 u64 root_gpa, u8 agaw, u16 did)
