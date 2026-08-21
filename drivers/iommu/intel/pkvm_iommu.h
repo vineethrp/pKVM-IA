@@ -73,6 +73,8 @@ int __init pkvm_host_init_iommu(void);
 
 int pkvm_qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
 			unsigned int count, unsigned long options);
+int pkvm_alloc_domain(void *root, u8 agaw, bool use_first_level);
+int pkvm_free_domain(void *root);
 int pkvm_context_mapping(struct intel_iommu *iommu,
 			 struct device_domain_info *info, u8 bus, u8 devfn,
 			 u64 root_gpa, u8 agaw, u16 did);
@@ -139,6 +141,8 @@ int pkvm_intel_iommu_init(void);
 int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val);
 int pkvm_iommu_mmio_write(u64 phys, int len, u64 val);
 int pkvm_iommu_qi_submit(u64 phys, u64 desc_gpa, u32 count, u32 options);
+int pkvm_iommu_alloc_domain(u64 root_gpa, u8 agaw, bool use_first_level);
+int pkvm_iommu_free_domain(u64 root_gpa);
 int pkvm_iommu_clear_ce(struct clear_ce_data *data);
 int pkvm_iommu_set_lm_ce(struct set_lm_ce_data *in,
 			 struct set_lm_ce_data *out);
@@ -154,6 +158,17 @@ int pkvm_iommu_pasid_teardown(struct pasid_teardown_data *data);
 static inline int pkvm_qi_submit_sync(struct intel_iommu *iommu,
 				      struct qi_desc *desc, unsigned int count,
 				      unsigned long options)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int pkvm_alloc_domain(void *root, u8 agaw,
+				    bool use_first_level)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int pkvm_free_domain(void *root)
 {
 	return -EOPNOTSUPP;
 }
