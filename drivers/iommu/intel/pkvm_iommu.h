@@ -16,6 +16,7 @@
 
 #define PKVM_MAX_IOMMUS	16
 #define PKVM_MAX_SATC_DEVS	16
+#define PKVM_MAX_IOMMU_DEVICES	256
 
 /* Page-table levels represented by the IOMMU SAGAW capability. */
 #define PKVM_IOMMU_PGT_4LEVEL	BIT(2)
@@ -40,6 +41,8 @@ struct pkvm_iommu_device_id {
 
 struct qi_desc;
 struct intel_iommu;
+struct device_domain_info;
+struct pkvm_device;
 
 #ifndef __PKVM_HYP__
 #include <asm/kvm_host.h>
@@ -99,6 +102,13 @@ static inline bool is_iommu_mmio(u64 phys)
 
 bool overlaps_iommu_mmio(u64 phys, u64 size);
 bool is_dev_in_satc(u16 segment, u16 bdf);
+
+struct pkvm_device *
+pkvm_alloc_iommu_device(const struct device_domain_info *info);
+struct pkvm_device *
+pkvm_get_iommu_device(struct intel_iommu *iommu, u32 segment,
+		      u8 bus, u8 devfn);
+void pkvm_remove_iommu_device(struct pkvm_device *device);
 
 int pkvm_intel_iommu_init(void);
 int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val);

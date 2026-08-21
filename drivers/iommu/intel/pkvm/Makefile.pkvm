@@ -9,6 +9,7 @@ intel-iommu := ../../../../drivers/iommu/intel
 
 pkvm-hyp-$(CONFIG_PKVM_INTEL) += $(pkvm-iommu)/iommu.o \
 				 $(pkvm-iommu)/iommu_hc.o \
+				 $(pkvm-iommu)/device.o \
 				 $(intel-iommu)/dmar.o \
 				 $(intel-iommu)/iommu.o \
 				 $(intel-iommu)/pasid.o
