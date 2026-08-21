@@ -355,9 +355,14 @@ static bool iommu_paging_structure_coherency(struct intel_iommu *iommu)
 struct context_entry *iommu_context_addr(struct intel_iommu *iommu, u8 bus,
 					 u8 devfn, int alloc)
 {
-	struct root_entry *root = &iommu->root_entry[bus];
+	struct root_entry *root;
 	struct context_entry *context;
 	u64 *entry;
+
+	if (WARN_ON(!iommu->root_entry))
+		return NULL;
+
+	root = &iommu->root_entry[bus];
 
 	/*
 	 * Except that the caller requested to allocate a new entry,
@@ -1188,6 +1193,8 @@ static int domain_context_mapping_one(struct dmar_domain *domain,
 {
 #ifdef __PKVM_HYP__
 	struct intel_iommu *iommu = info->iommu;
+	struct pkvm_device *device = NULL;
+	bool device_allocated = false;
 	u8 bus = info->bus;
 	u8 devfn = info->devfn;
 #else
@@ -1227,8 +1234,32 @@ static int domain_context_mapping_one(struct dmar_domain *domain,
 
 	ret = 0;
 #ifdef __PKVM_HYP__
-	if (context_present(context))
+	if (context_present(context)) {
+		/*
+		 * DMA alias walks can visit the same RID more than once when
+		 * alias sets intersect. Match the host driver's idempotent
+		 * behavior without allocating another device or retaining
+		 * another domain reference for the RID.
+		 */
+		device = pkvm_get_iommu_device(iommu, info->segment,
+					       bus, devfn);
+		if (IS_ERR(device)) {
+			ret = PTR_ERR(device);
+			goto out_unlock;
+		}
+
+		ret = -EEXIST;
 		goto out_unlock;
+	}
+
+	device = pkvm_alloc_iommu_device(info);
+	if (IS_ERR(device)) {
+		ret = PTR_ERR(device);
+		device = NULL;
+		goto out_unlock;
+	}
+	device_allocated = true;
+	info = &device->info;
 #else
 	if (context_present(context) && !context_copied(iommu, bus, devfn))
 		goto out_unlock;
@@ -1253,6 +1284,10 @@ static int domain_context_mapping_one(struct dmar_domain *domain,
 	ret = 0;
 
 out_unlock:
+#ifdef __PKVM_HYP__
+	if (ret && device_allocated)
+		pkvm_remove_iommu_device(device);
+#endif
 	spin_unlock(&iommu->lock);
 
 	return ret;
@@ -1292,27 +1327,56 @@ domain_context_mapping(struct dmar_domain *domain, struct device *dev)
 }
 #endif /* !__PKVM_HYP__ */
 
-static __maybe_unused void
+#ifndef __PKVM_HYP__
+static __maybe_unused int
 domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
+#else
+int domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
+#endif
 {
 	struct intel_iommu *iommu = info->iommu;
 	struct context_entry *context;
+#ifdef __PKVM_HYP__
+	struct pkvm_device *device;
+#endif
+	int ret = 0;
 	u16 did;
 
 	spin_lock(&iommu->lock);
 	context = iommu_context_addr(iommu, bus, devfn, 0);
-	if (!context) {
-		spin_unlock(&iommu->lock);
-		return;
-	}
+	if (!context)
+		goto out_unlock;
 
+#ifdef __PKVM_HYP__
+	if (!context_present(context))
+		goto out_unlock;
+
+	device = pkvm_get_iommu_device(iommu, info->segment, bus, devfn);
+	if (IS_ERR(device)) {
+		ret = PTR_ERR(device);
+		goto out_unlock;
+	}
+	info = &device->info;
+#endif
 	did = context_domain_id(context);
 	context_clear_present(context);
 	__iommu_flush_cache(iommu, context, sizeof(*context));
+#ifndef __PKVM_HYP__
 	spin_unlock(&iommu->lock);
+#endif
 	intel_context_flush_no_pasid(info, context, did);
 	context_clear_entry(context);
+#ifdef __PKVM_HYP__
+	pkvm_remove_iommu_device(device);
+	spin_unlock(&iommu->lock);
+#endif
 	__iommu_flush_cache(iommu, context, sizeof(*context));
+
+	return 0;
+
+out_unlock:
+	spin_unlock(&iommu->lock);
+	return ret;
 }
 
 #ifndef __PKVM_HYP__

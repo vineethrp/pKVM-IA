@@ -69,6 +69,10 @@ int __init pkvm_host_init_iommu(void);
 
 int pkvm_qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
 			unsigned int count, unsigned long options);
+int pkvm_context_mapping(struct intel_iommu *iommu,
+			 struct device_domain_info *info, u8 bus, u8 devfn,
+			 u64 root_gpa, u8 agaw, u16 did);
+int pkvm_context_clear(struct intel_iommu *iommu, u8 bus, u8 devfn);
 #else
 extern unsigned int iommu_pglvl_mask;
 extern unsigned int iommu_pgsz_mask;
@@ -114,11 +118,28 @@ int pkvm_intel_iommu_init(void);
 int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val);
 int pkvm_iommu_mmio_write(u64 phys, int len, u64 val);
 int pkvm_iommu_qi_submit(u64 phys, u64 desc_gpa, u32 count, u32 options);
+int pkvm_iommu_clear_ce(struct clear_ce_data *data);
+int pkvm_iommu_set_lm_ce(struct set_lm_ce_data *in,
+			 struct set_lm_ce_data *out);
 #endif /* !__PKVM_HYP__ */
 #else /* !CONFIG_PKVM_INTEL */
 static inline int pkvm_qi_submit_sync(struct intel_iommu *iommu,
 				      struct qi_desc *desc, unsigned int count,
 				      unsigned long options)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int pkvm_context_mapping(struct intel_iommu *iommu,
+				       struct device_domain_info *info,
+				       u8 bus, u8 devfn, u64 root_gpa, u8 agaw,
+				       u16 did)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int pkvm_context_clear(struct intel_iommu *iommu,
+				     u8 bus, u8 devfn)
 {
 	return -EOPNOTSUPP;
 }
