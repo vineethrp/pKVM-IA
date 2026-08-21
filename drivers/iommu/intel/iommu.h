@@ -1099,6 +1099,8 @@ static inline void context_clear_entry(struct context_entry *context)
 int domain_context_mapping_one(struct dmar_domain *domain,
 			       struct device_domain_info *info,
 			       u16 did);
+int domain_context_clear_one(struct device_domain_info *info,
+			     u8 bus, u8 devfn);
 #endif
 
 #if defined(CONFIG_INTEL_IOMMU) && !defined(__PKVM_HYP__)

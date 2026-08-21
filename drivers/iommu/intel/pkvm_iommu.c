@@ -7,6 +7,7 @@
 
 #include <linux/kernel.h>
 #include "iommu.h"
+#include "../iommu-pages.h"
 
 u64 pkvm_readq(struct intel_iommu *iommu, unsigned long offset)
 {
@@ -175,4 +176,58 @@ int pkvm_qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
 			     virt_to_phys(desc_ptr), count, options);
 	kfree(desc_ptr);
 	return ret;
+}
+
+int pkvm_context_mapping(struct intel_iommu *iommu,
+			 struct device_domain_info *info, u8 bus, u8 devfn,
+			 u64 root_gpa, u8 agaw, u16 did)
+{
+	union pkvm_hc_data d = {};
+	struct set_lm_ce_data *data = &d.iommu_set_lm_ce.in;
+	int ret;
+
+	data->phys = iommu->reg_phys;
+	data->root_gpa = root_gpa;
+	data->segment = iommu->segment;
+	data->did = did;
+	data->bus = bus;
+	data->devfn = devfn;
+	data->ats_qdep = info ? info->ats_qdep : 0;
+	data->agaw = agaw;
+	data->ats_supported = info ? info->ats_supported : 0;
+	data->ats_enabled = info ? info->ats_enabled : 0;
+
+	spin_lock(&iommu->lock);
+	ret = pkvm_hypercall_inout(iommu_set_lm_ce, &d, &d);
+	if (ret == -ENOMEM) {
+		void *page;
+
+		page = iommu_alloc_pages_node_sz(iommu->node, GFP_ATOMIC, SZ_4K);
+		if (!page) {
+			ret = -ENOMEM;
+			goto out_unlock;
+		}
+
+		data->donation_page_gpa = virt_to_phys(page);
+		ret = pkvm_hypercall_inout(iommu_set_lm_ce, &d, &d);
+		if (data->donation_page_gpa)
+			iommu_free_pages(phys_to_virt(data->donation_page_gpa));
+	}
+
+out_unlock:
+	spin_unlock(&iommu->lock);
+	return ret;
+}
+
+int pkvm_context_clear(struct intel_iommu *iommu, u8 bus, u8 devfn)
+{
+	union pkvm_hc_data d = {};
+	struct clear_ce_data *data = &d.iommu_clear_ce.data;
+
+	data->phys = iommu->reg_phys;
+	data->segment = iommu->segment;
+	data->bus = bus;
+	data->devfn = devfn;
+
+	return pkvm_hypercall_in(iommu_clear_ce, &d);
 }
