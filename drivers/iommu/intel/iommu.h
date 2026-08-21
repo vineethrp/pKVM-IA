@@ -883,6 +883,7 @@ struct dev_pasid_info {
 };
 #else
 struct device_domain_info {
+	u32 segment;
 	u8 bus;
 	u8 devfn;
 	u16 pfsid;
@@ -890,6 +891,12 @@ struct device_domain_info {
 	u8 ats_enabled:1;
 	u8 ats_qdep;
 	struct intel_iommu *iommu;
+};
+
+struct pkvm_device {
+	struct device_domain_info info;
+	unsigned long index;
+	struct hlist_node hnode;
 };
 #endif /* !__PKVM_HYP__ */
 
