@@ -284,28 +284,44 @@ devtlb_invalidation_with_pasid(struct intel_iommu *iommu,
 }
 
 #ifndef __PKVM_HYP__
-void intel_pasid_tear_down_entry(struct intel_iommu *iommu, struct device *dev,
+int intel_pasid_tear_down_entry(struct intel_iommu *iommu,
+				struct device *dev, u32 pasid,
+				bool fault_ignore)
 #else
-void intel_pasid_tear_down_entry(struct intel_iommu *iommu,
-				 struct pkvm_device *dev,
+int intel_pasid_tear_down_entry(struct intel_iommu *iommu,
+				struct pkvm_device *dev, u32 pasid,
+				bool fault_ignore)
 #endif
-				 u32 pasid, bool fault_ignore)
 {
 	struct pasid_entry *pte;
 	u16 did, pgtt;
 
+#ifndef __PKVM_HYP__
 	spin_lock(&iommu->lock);
+#endif
 	pte = intel_pasid_get_entry(dev, pasid);
-	if (WARN_ON(IS_ERR(pte))) {
+
+#ifndef __PKVM_HYP__
+	/*
+	 * A deprivileged host can request teardown of an unpopulated PASID.
+	 * Return the lookup error without letting it trigger a hyp warning.
+	 */
+	WARN_ON(IS_ERR(pte));
+#endif
+	if (IS_ERR(pte)) {
+#ifndef __PKVM_HYP__
 		spin_unlock(&iommu->lock);
-		return;
+#endif
+		return PTR_ERR(pte);
 	}
 
 	if (!pasid_pte_is_present(pte)) {
 		if (!pasid_pte_is_fault_disabled(pte)) {
+#ifndef __PKVM_HYP__
 			WARN_ON(READ_ONCE(pte->val[0]) != 0);
 			spin_unlock(&iommu->lock);
-			return;
+#endif
+			return -ENOENT;
 		}
 
 		/*
@@ -315,18 +331,24 @@ void intel_pasid_tear_down_entry(struct intel_iommu *iommu,
 		 * drain the PRQ for the PASID before return.
 		 */
 		pasid_clear_entry(pte);
-		spin_unlock(&iommu->lock);
 #ifndef __PKVM_HYP__
+		spin_unlock(&iommu->lock);
 		intel_iommu_drain_pasid_prq(dev, pasid);
 #endif
-
-		return;
+		return 0;
 	}
 
 	did = pasid_get_domain_id(pte);
 	pgtt = pasid_pte_get_pgtt(pte);
+#ifdef __PKVM_HYP__
+	if (pgtt != PASID_ENTRY_PGTT_FL_ONLY &&
+	    pgtt != PASID_ENTRY_PGTT_SL_ONLY)
+		return -EINVAL;
+#endif
 	pasid_clear_present(pte);
+#ifndef __PKVM_HYP__
 	spin_unlock(&iommu->lock);
+#endif
 
 	if (!ecap_coherent(iommu->ecap))
 		clflush_cache_range(pte, sizeof(*pte));
@@ -347,6 +369,8 @@ void intel_pasid_tear_down_entry(struct intel_iommu *iommu,
 	if (!fault_ignore)
 		intel_iommu_drain_pasid_prq(dev, pasid);
 #endif
+
+	return 0;
 }
 
 /*

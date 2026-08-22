@@ -141,6 +141,18 @@ pasid_get_domain_id(struct pasid_entry *pe)
 	return (u16)(READ_ONCE(pe->val[1]) & GENMASK_ULL(15, 0));
 }
 
+/* Get the first-level page-table pointer from a scalable-mode PASID entry. */
+static inline u64 pasid_get_flptr(struct pasid_entry *pe)
+{
+	return READ_ONCE(pe->val[2]) & VTD_PAGE_MASK;
+}
+
+/* Get the second-level page-table pointer from a scalable-mode PASID entry. */
+static inline u64 pasid_get_slptr(struct pasid_entry *pe)
+{
+	return READ_ONCE(pe->val[0]) & VTD_PAGE_MASK;
+}
+
 /*
  * Setup the SLPTPTR(Second Level Page Table Pointer) field (Bit 12~63)
  * of a scalable mode PASID entry.
@@ -330,11 +342,12 @@ int intel_pasid_setup_pass_through(struct intel_iommu *iommu,
 int intel_pasid_setup_nested(struct intel_iommu *iommu, struct device *dev,
 			     u32 pasid, struct dmar_domain *domain);
 #ifndef __PKVM_HYP__
-void intel_pasid_tear_down_entry(struct intel_iommu *iommu,
-				 struct device *dev, u32 pasid,
-				 bool fault_ignore);
+int intel_pasid_tear_down_entry(struct intel_iommu *iommu,
+				struct device *dev, u32 pasid,
+				bool fault_ignore);
 #else
-void intel_pasid_tear_down_entry(struct intel_iommu *iommu,
+/* The caller must hold iommu->lock. */
+int intel_pasid_tear_down_entry(struct intel_iommu *iommu,
 				 struct pkvm_device *dev, u32 pasid,
 				 bool fault_ignore);
 #endif
