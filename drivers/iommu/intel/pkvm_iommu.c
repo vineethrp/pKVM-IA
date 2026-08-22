@@ -351,3 +351,18 @@ out_unlock:
 	spin_unlock(&iommu->lock);
 	return ret;
 }
+
+int pkvm_pasid_teardown(struct device_domain_info *info, u32 pasid)
+{
+	union pkvm_hc_data d = {};
+	struct pasid_teardown_data *data = &d.iommu_pasid_teardown.data;
+	struct intel_iommu *iommu = info->iommu;
+
+	data->phys = iommu->reg_phys;
+	data->pasid = pasid;
+	data->segment = info->segment;
+	data->bus = info->bus;
+	data->devfn = info->devfn;
+
+	return pkvm_hypercall_in(iommu_pasid_teardown, &d);
+}

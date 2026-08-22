@@ -80,7 +80,7 @@ static int iommu_set_lm_ce(struct set_lm_ce_data *data)
 	struct dmar_domain domain = {};
 	int ret;
 
-	if (!iommu || !iommu->root_entry)
+	if (!iommu || !iommu->root_entry || sm_supported(iommu))
 		return -EINVAL;
 
 	info.segment = data->segment;
@@ -289,5 +289,37 @@ int pkvm_iommu_pasid_setup_sl(struct pasid_setup_sl_data *in,
 	int ret = iommu_pasid_setup_sl(in);
 
 	*out = *in;
+	return ret;
+}
+
+int pkvm_iommu_pasid_teardown(struct pasid_teardown_data *data)
+{
+	struct intel_iommu *iommu = iommu_from_phys(data->phys);
+	struct pkvm_device *device;
+	struct pasid_table *table;
+	int ret;
+
+	if (!iommu || !iommu->root_entry || !sm_supported(iommu))
+		return -EINVAL;
+
+	pkvm_spin_lock(&iommu->lock);
+	device = pkvm_get_iommu_device(iommu, data->segment,
+				       data->bus, data->devfn);
+	if (IS_ERR(device)) {
+		ret = PTR_ERR(device);
+		goto out_unlock;
+	}
+
+	table = device->info.pasid_table;
+	if (!table || data->pasid >= table->max_pasid) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	/* Keep the device alive until all PASID invalidations complete. */
+	ret = intel_pasid_tear_down_entry(iommu, device, data->pasid, false);
+
+out_unlock:
+	pkvm_spin_unlock(&iommu->lock);
 	return ret;
 }

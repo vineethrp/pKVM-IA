@@ -81,6 +81,7 @@ int pkvm_pasid_setup_fl(struct device_domain_info *info,
 			int flags);
 int pkvm_pasid_setup_sl(struct device_domain_info *info,
 			phys_addr_t root, u8 agaw, u32 pasid, u16 did);
+int pkvm_pasid_teardown(struct device_domain_info *info, u32 pasid);
 #else
 extern unsigned int iommu_pglvl_mask;
 extern unsigned int iommu_pgsz_mask;
@@ -135,6 +136,7 @@ int pkvm_iommu_pasid_setup_fl(struct pasid_setup_fl_data *in,
 			      struct pasid_setup_fl_data *out);
 int pkvm_iommu_pasid_setup_sl(struct pasid_setup_sl_data *in,
 			      struct pasid_setup_sl_data *out);
+int pkvm_iommu_pasid_teardown(struct pasid_teardown_data *data);
 #endif /* !__PKVM_HYP__ */
 #else /* !CONFIG_PKVM_INTEL */
 static inline int pkvm_qi_submit_sync(struct intel_iommu *iommu,
@@ -175,6 +177,12 @@ static inline int pkvm_pasid_setup_fl(struct device_domain_info *info,
 static inline int pkvm_pasid_setup_sl(struct device_domain_info *info,
 				      phys_addr_t root, u8 agaw, u32 pasid,
 				      u16 did)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int pkvm_pasid_teardown(struct device_domain_info *info,
+				      u32 pasid)
 {
 	return -EOPNOTSUPP;
 }
