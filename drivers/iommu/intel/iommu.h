@@ -887,10 +887,15 @@ struct device_domain_info {
 	u8 bus;
 	u8 devfn;
 	u16 pfsid;
+	u8 pasid_supported:3;
+	u8 pasid_enabled:1;
+	u8 pri_supported:1;
+	u8 pri_enabled:1;
 	u8 ats_supported:1;
 	u8 ats_enabled:1;
 	u8 ats_qdep;
 	struct intel_iommu *iommu;
+	struct pasid_table *pasid_table;
 };
 
 struct pkvm_device {
@@ -898,6 +903,12 @@ struct pkvm_device {
 	unsigned long index;
 	struct hlist_node hnode;
 };
+
+static inline struct device_domain_info *
+pkvm_dev_iommu_priv_get(struct pkvm_device *device)
+{
+	return &device->info;
+}
 #endif /* !__PKVM_HYP__ */
 
 static inline void __iommu_flush_cache(
