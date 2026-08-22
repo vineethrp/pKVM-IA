@@ -319,7 +319,8 @@ int intel_pasid_setup_first_level(struct intel_iommu *iommu,
 				  int flags);
 int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 				   struct dmar_domain *domain,
-				   struct pkvm_device *dev, u16 did, u32 pasid);
+				   struct device_domain_info *info,
+				   u16 did, u32 pasid);
 #endif
 int intel_pasid_setup_dirty_tracking(struct intel_iommu *iommu,
 				     struct device *dev, u32 pasid,

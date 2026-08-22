@@ -314,3 +314,40 @@ out_unlock:
 	spin_unlock(&iommu->lock);
 	return ret;
 }
+
+int pkvm_pasid_setup_sl(struct device_domain_info *info,
+			phys_addr_t root, u8 agaw, u32 pasid, u16 did)
+{
+	union pkvm_hc_data d = {};
+	struct pasid_setup_sl_data *data = &d.iommu_pasid_setup_sl.in;
+	struct intel_iommu *iommu = info->iommu;
+	int ret;
+
+	data->phys = iommu->reg_phys;
+	data->root_gpa = root;
+	data->pasid = pasid;
+	data->segment = info->segment;
+	data->did = did;
+	data->bus = info->bus;
+	data->devfn = info->devfn;
+	data->agaw = agaw;
+
+	spin_lock(&iommu->lock);
+	ret = pkvm_hypercall_inout(iommu_pasid_setup_sl, &d, &d);
+	if (ret == -ENOMEM) {
+		void *page;
+
+		page = iommu_alloc_pages_node_sz(iommu->node, GFP_ATOMIC, SZ_4K);
+		if (!page)
+			goto out_unlock;
+
+		data->donation_page_gpa = virt_to_phys(page);
+		ret = pkvm_hypercall_inout(iommu_pasid_setup_sl, &d, &d);
+		if (data->donation_page_gpa)
+			iommu_free_pages(phys_to_virt(data->donation_page_gpa));
+	}
+
+out_unlock:
+	spin_unlock(&iommu->lock);
+	return ret;
+}
