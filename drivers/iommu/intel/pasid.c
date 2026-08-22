@@ -837,10 +837,15 @@ static int context_entry_set_pasid_table(struct context_entry *context,
 #ifndef __PKVM_HYP__
 static int device_pasid_table_setup(struct device *dev, u8 bus, u8 devfn)
 #else
-int device_pasid_table_setup(struct pkvm_device *dev, u8 bus, u8 devfn)
+int device_pasid_table_setup(struct device_domain_info *info,
+			     u8 bus, u8 devfn)
 #endif
 {
+#ifndef __PKVM_HYP__
 	struct device_domain_info *info = dev_iommu_priv_get(dev);
+#else
+	struct pkvm_device *dev;
+#endif
 	struct intel_iommu *iommu = info->iommu;
 	struct context_entry *context;
 
@@ -854,8 +859,15 @@ int device_pasid_table_setup(struct pkvm_device *dev, u8 bus, u8 devfn)
 #ifdef __PKVM_HYP__
 	if (context_present(context)) {
 		spin_unlock(&iommu->lock);
-		return 0;
+		return -EEXIST;
 	}
+
+	dev = pkvm_alloc_iommu_device(info);
+	if (IS_ERR(dev)) {
+		spin_unlock(&iommu->lock);
+		return PTR_ERR(dev);
+	}
+	info = &dev->info;
 #else
 	if (context_present(context) && !context_copied(iommu, bus, devfn)) {
 		spin_unlock(&iommu->lock);

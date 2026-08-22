@@ -5,6 +5,7 @@
 #include <linux/pci.h>
 
 #include "../iommu.h"
+#include "../pasid.h"
 
 /*
  * Each requester ID, including a DMA alias, consumes one bounded record.
@@ -17,6 +18,7 @@
 static DEFINE_HASHTABLE(iommu_device_hash, 8);
 static DECLARE_BITMAP(iommu_device_bitmap, PKVM_MAX_IOMMU_DEVICES);
 static struct pkvm_device iommu_devices[PKVM_MAX_IOMMU_DEVICES];
+static struct pasid_table iommu_device_pasid_tables[PKVM_MAX_IOMMU_DEVICES];
 static DEFINE_PKVM_SPINLOCK(iommu_device_lock);
 
 static u32 pkvm_device_key(u32 segment, u16 bdf)
@@ -46,7 +48,9 @@ static int validate_device_info(const struct device_domain_info *info,
 
 	if (info->segment != iommu->segment ||
 	    info->ats_qdep > PCI_ATS_MAX_QDEP ||
-	    (info->ats_enabled && !info->ats_supported))
+	    (info->ats_enabled && !info->ats_supported) ||
+	    (info->pasid_enabled && !info->pasid_supported) ||
+	    (info->pri_enabled && !info->pri_supported))
 		return -EINVAL;
 
 	*satc = is_dev_in_satc(info->segment, bdf);
@@ -87,6 +91,10 @@ pkvm_alloc_iommu_device(const struct device_domain_info *info)
 	__set_bit(index, iommu_device_bitmap);
 	device = &iommu_devices[index];
 	device->info = *info;
+	if (info->pasid_table) {
+		iommu_device_pasid_tables[index] = *info->pasid_table;
+		device->info.pasid_table = &iommu_device_pasid_tables[index];
+	}
 	if (satc && ecap_dit(iommu->ecap))
 		device->info.pfsid = bdf;
 	device->index = index;
@@ -130,6 +138,8 @@ void pkvm_remove_iommu_device(struct pkvm_device *device)
 
 	hash_del(&device->hnode);
 	__clear_bit(device->index, iommu_device_bitmap);
+	memset(&iommu_device_pasid_tables[device->index], 0,
+	       sizeof(iommu_device_pasid_tables[device->index]));
 	memset(device, 0, sizeof(*device));
 
 out_unlock:

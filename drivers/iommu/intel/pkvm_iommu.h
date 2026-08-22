@@ -73,6 +73,9 @@ int pkvm_context_mapping(struct intel_iommu *iommu,
 			 struct device_domain_info *info, u8 bus, u8 devfn,
 			 u64 root_gpa, u8 agaw, u16 did);
 int pkvm_context_clear(struct intel_iommu *iommu, u8 bus, u8 devfn);
+int pkvm_pasid_table_setup(struct intel_iommu *iommu,
+			   struct device_domain_info *info,
+			   u8 bus, u8 devfn);
 #else
 extern unsigned int iommu_pglvl_mask;
 extern unsigned int iommu_pgsz_mask;
@@ -121,6 +124,8 @@ int pkvm_iommu_qi_submit(u64 phys, u64 desc_gpa, u32 count, u32 options);
 int pkvm_iommu_clear_ce(struct clear_ce_data *data);
 int pkvm_iommu_set_lm_ce(struct set_lm_ce_data *in,
 			 struct set_lm_ce_data *out);
+int pkvm_iommu_set_sm_ce(struct set_sm_ce_data *in,
+			 struct set_sm_ce_data *out);
 #endif /* !__PKVM_HYP__ */
 #else /* !CONFIG_PKVM_INTEL */
 static inline int pkvm_qi_submit_sync(struct intel_iommu *iommu,
@@ -140,6 +145,13 @@ static inline int pkvm_context_mapping(struct intel_iommu *iommu,
 
 static inline int pkvm_context_clear(struct intel_iommu *iommu,
 				     u8 bus, u8 devfn)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int pkvm_pasid_table_setup(struct intel_iommu *iommu,
+					 struct device_domain_info *info,
+					 u8 bus, u8 devfn)
 {
 	return -EOPNOTSUPP;
 }
