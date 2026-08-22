@@ -1330,6 +1330,24 @@ domain_context_mapping(struct dmar_domain *domain, struct device *dev)
 }
 #endif /* !__PKVM_HYP__ */
 
+#ifdef __PKVM_HYP__
+static void pasid_free_table(struct pasid_dir_entry *dir, int max_pde)
+{
+	int i;
+
+	for (i = 0; i < max_pde; i++) {
+		struct pasid_entry *table = get_pasid_table_from_pde(&dir[i]);
+
+		if (table)
+			pkvm_hyp_donate_host(__pkvm_pa(table), VTD_PAGE_SIZE, false);
+	}
+
+	pkvm_hyp_donate_host(__pkvm_pa(dir),
+			     ALIGN(max_pde * sizeof(*dir), VTD_PAGE_SIZE),
+			     false);
+}
+#endif
+
 #ifndef __PKVM_HYP__
 static __maybe_unused int
 domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
@@ -1341,6 +1359,8 @@ int domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
 	struct context_entry *context;
 #ifdef __PKVM_HYP__
 	struct pkvm_device *device;
+	struct pasid_dir_entry *pasid_dir = NULL;
+	int max_pde = 0;
 #endif
 	int ret = 0;
 	u16 did;
@@ -1360,6 +1380,10 @@ int domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
 		goto out_unlock;
 	}
 	info = &device->info;
+	if (sm_supported(iommu)) {
+		pasid_dir = __pkvm_va(context->lo & VTD_PAGE_MASK);
+		max_pde = get_pasid_dir_size(context);
+	}
 #endif
 	did = context_domain_id(context);
 	context_clear_present(context);
@@ -1374,6 +1398,10 @@ int domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
 	spin_unlock(&iommu->lock);
 #endif
 	__iommu_flush_cache(iommu, context, sizeof(*context));
+#ifdef __PKVM_HYP__
+	if (pasid_dir)
+		pasid_free_table(pasid_dir, max_pde);
+#endif
 
 	return 0;
 

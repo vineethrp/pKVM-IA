@@ -10,6 +10,7 @@
 #include "pkvm/pkvm.h"
 #include "pkvm/debug.h"
 #include "../iommu.h"
+#include "../pasid.h"
 
 int pkvm_iommu_qi_submit(u64 phys, u64 desc_gpa, u32 count, u32 options)
 {
@@ -108,6 +109,79 @@ int pkvm_iommu_set_lm_ce(struct set_lm_ce_data *in,
 			 struct set_lm_ce_data *out)
 {
 	int ret = iommu_set_lm_ce(in);
+
+	*out = *in;
+	return ret;
+}
+
+static int pasid_dir_size(u32 max_pasid, unsigned long *size)
+{
+	if (max_pasid < PASID_TBL_ENTRIES * 512 ||
+	    max_pasid > PASID_MAX || !is_power_of_2(max_pasid))
+		return -EINVAL;
+
+	*size = max_pasid >> (PASID_PDE_SHIFT - 3);
+	return 0;
+}
+
+static int iommu_set_sm_ce(struct set_sm_ce_data *data)
+{
+	struct intel_iommu *iommu = iommu_from_phys(data->phys);
+	struct device_domain_info info = {};
+	struct pasid_table table = {};
+	phys_addr_t pasid_table_pa;
+	unsigned long size;
+	int ret;
+
+	if (!iommu || !iommu->root_entry || !sm_supported(iommu))
+		return -EINVAL;
+
+	ret = pasid_dir_size(data->max_pasid, &size);
+	if (ret)
+		return ret;
+
+	pasid_table_pa = pkvm_host_gpa_to_phys(data->pasid_table_gpa);
+	if (!pasid_table_pa || !PAGE_ALIGNED(pasid_table_pa))
+		return -EINVAL;
+
+	info.segment = data->segment;
+	info.bus = data->bus;
+	info.devfn = data->devfn;
+	info.ats_qdep = data->ats_qdep;
+	info.ats_enabled = data->ats_enabled;
+	info.ats_supported = data->ats_supported;
+	info.pasid_supported = data->pasid_supported;
+	info.pasid_enabled = data->pasid_enabled;
+	info.pri_supported = data->pri_supported;
+	info.pri_enabled = data->pri_enabled;
+	info.iommu = iommu;
+	table.table = __pkvm_va(pasid_table_pa);
+	table.max_pasid = data->max_pasid;
+	info.pasid_table = &table;
+
+	ret = accept_page_donation(iommu, &data->donation_page_gpa);
+	if (ret)
+		return ret;
+
+	ret = pkvm_host_donate_hyp_share_ro(pasid_table_pa, size, true);
+	if (ret)
+		return ret;
+
+	__iommu_flush_cache(iommu, table.table, size);
+	ret = device_pasid_table_setup(&info, data->bus, data->devfn);
+	if (ret) {
+		pkvm_hyp_donate_host(pasid_table_pa, size, false);
+		if (ret == -EEXIST)
+			ret = 0;
+	}
+
+	return ret;
+}
+
+int pkvm_iommu_set_sm_ce(struct set_sm_ce_data *in,
+			 struct set_sm_ce_data *out)
+{
+	int ret = iommu_set_sm_ce(in);
 
 	*out = *in;
 	return ret;

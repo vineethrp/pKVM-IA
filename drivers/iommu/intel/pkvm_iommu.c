@@ -7,6 +7,7 @@
 
 #include <linux/kernel.h>
 #include "iommu.h"
+#include "pasid.h"
 #include "../iommu-pages.h"
 
 u64 pkvm_readq(struct intel_iommu *iommu, unsigned long offset)
@@ -230,4 +231,48 @@ int pkvm_context_clear(struct intel_iommu *iommu, u8 bus, u8 devfn)
 	data->devfn = devfn;
 
 	return pkvm_hypercall_in(iommu_clear_ce, &d);
+}
+
+int pkvm_pasid_table_setup(struct intel_iommu *iommu,
+			   struct device_domain_info *info,
+			   u8 bus, u8 devfn)
+{
+	union pkvm_hc_data d = {};
+	struct set_sm_ce_data *data = &d.iommu_set_sm_ce.in;
+	int ret;
+
+	data->phys = iommu->reg_phys;
+	data->pasid_table_gpa = virt_to_phys(info->pasid_table->table);
+	data->max_pasid = info->pasid_table->max_pasid;
+	data->segment = iommu->segment;
+	data->bus = bus;
+	data->devfn = devfn;
+	data->ats_qdep = info->ats_qdep;
+	data->ats_enabled = info->ats_enabled;
+	data->ats_supported = info->ats_supported;
+	data->pasid_supported = info->pasid_supported;
+	data->pasid_enabled = info->pasid_enabled;
+	data->pri_supported = info->pri_supported;
+	data->pri_enabled = info->pri_enabled;
+
+	spin_lock(&iommu->lock);
+	ret = pkvm_hypercall_inout(iommu_set_sm_ce, &d, &d);
+	if (ret == -ENOMEM) {
+		void *page;
+
+		page = iommu_alloc_pages_node_sz(iommu->node, GFP_ATOMIC, SZ_4K);
+		if (!page) {
+			ret = -ENOMEM;
+			goto out_unlock;
+		}
+
+		data->donation_page_gpa = virt_to_phys(page);
+		ret = pkvm_hypercall_inout(iommu_set_sm_ce, &d, &d);
+		if (data->donation_page_gpa)
+			iommu_free_pages(phys_to_virt(data->donation_page_gpa));
+	}
+
+out_unlock:
+	spin_unlock(&iommu->lock);
+	return ret;
 }
