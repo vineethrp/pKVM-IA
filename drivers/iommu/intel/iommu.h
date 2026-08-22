@@ -610,10 +610,11 @@ struct qi_batch {
 #ifdef __PKVM_HYP__
 struct dmar_domain {
 	phys_addr_t root_pa;
+	struct pkvm_pgtable pgt;
+	struct pkvm_memcache mc;
 	u8 agaw;
 	u8 iova_bits;
 	u8 use_first_level:1;
-	unsigned int pgsz_mask;
 	atomic_t refcount;
 	unsigned int index;
 	struct hlist_node hnode;

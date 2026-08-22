@@ -10,6 +10,7 @@ intel-iommu := ../../../../drivers/iommu/intel
 pkvm-hyp-$(CONFIG_PKVM_INTEL) += $(pkvm-iommu)/iommu.o \
 				 $(pkvm-iommu)/iommu_hc.o \
 				 $(pkvm-iommu)/domain.o \
+				 $(pkvm-iommu)/pgtable.o \
 				 $(pkvm-iommu)/device.o \
 				 $(pkvm-iommu)/cache.o \
 				 $(intel-iommu)/dmar.o \
