@@ -78,7 +78,7 @@ static bool domain_compatible(struct dmar_domain *domain,
 		return false;
 	if (domain->iova_bits > iova_bits)
 		return false;
-	if (domain->pgsz_mask &
+	if (domain->pgt.cap.allowed_pgsz &
 	    ~domain_pgsize_mask(iommu, domain->use_first_level))
 		return false;
 
@@ -194,7 +194,8 @@ pkvm_alloc_iommu_domain(struct intel_iommu *iommu, phys_addr_t root, u8 agaw,
 	domain->agaw = agaw;
 	domain->iova_bits = iova_bits;
 	domain->use_first_level = use_first_level;
-	domain->pgsz_mask = domain_pgsize_mask(iommu, use_first_level);
+	pkvm_iommu_pgtable_init(domain,
+				domain_pgsize_mask(iommu, use_first_level));
 	domain->index = index;
 	atomic_set(&domain->refcount, 1);
 	pkvm_spin_lock_init(&domain->lock);

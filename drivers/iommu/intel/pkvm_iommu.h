@@ -14,6 +14,7 @@
 #include <asm/pkvm_spinlock.h>
 #include <linux/atomic.h>
 #include <linux/list.h>
+#include "pkvm/pgtable.h"
 #endif
 
 #define PKVM_MAX_IOMMUS	16
@@ -124,6 +125,8 @@ bool overlaps_iommu_mmio(u64 phys, u64 size);
 bool is_dev_in_satc(u16 segment, u16 bdf);
 
 int pkvm_iommu_domain_init(void);
+void pkvm_iommu_pgtable_init(struct dmar_domain *domain,
+			     unsigned int allowed_pgsz);
 struct dmar_domain *
 pkvm_alloc_iommu_domain(struct intel_iommu *iommu, phys_addr_t root, u8 agaw,
 			bool use_first_level);
