@@ -1345,6 +1345,27 @@ domain_context_mapping(struct dmar_domain *domain, struct device *dev)
 #endif /* !__PKVM_HYP__ */
 
 #ifdef __PKVM_HYP__
+static bool
+pasid_table_has_present_entries(struct pasid_dir_entry *dir, int max_pde)
+{
+	int i;
+
+	for (i = 0; i < max_pde; i++) {
+		struct pasid_entry *table;
+		int j;
+
+		table = get_pasid_table_from_pde(&dir[i]);
+		if (!table)
+			continue;
+
+		for (j = 0; j < PASID_TBL_ENTRIES; j++)
+			if (pasid_pte_is_present(&table[j]))
+				return true;
+	}
+
+	return false;
+}
+
 static void pasid_free_table(struct pasid_dir_entry *dir, int max_pde)
 {
 	int i;
@@ -1397,6 +1418,10 @@ int domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
 	if (sm_supported(iommu)) {
 		pasid_dir = __pkvm_va(context->lo & VTD_PAGE_MASK);
 		max_pde = get_pasid_dir_size(context);
+		if (pasid_table_has_present_entries(pasid_dir, max_pde)) {
+			ret = -EBUSY;
+			goto out_unlock;
+		}
 	}
 #endif
 	did = context_domain_id(context);
