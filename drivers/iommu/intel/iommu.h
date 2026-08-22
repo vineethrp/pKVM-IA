@@ -616,6 +616,10 @@ struct dmar_domain {
 	unsigned int index;
 	struct hlist_node hnode;
 	pkvm_spinlock_t lock;
+	pkvm_spinlock_t cache_lock;
+	struct list_head cache_tags;
+	struct qi_batch _qi_batch;
+	struct qi_batch *qi_batch;
 };
 #else
 struct dmar_domain {
@@ -1365,6 +1369,7 @@ struct cache_tag {
 	struct list_head node;
 	enum cache_tag_type type;
 	struct intel_iommu *iommu;
+#ifndef __PKVM_HYP__
 	/*
 	 * The @dev field represents the location of the cache. For IOTLB, it
 	 * resides on the IOMMU hardware. @dev stores the device pointer to
@@ -1372,17 +1377,31 @@ struct cache_tag {
 	 * @dev stores the device pointer to that endpoint.
 	 */
 	struct device *dev;
+#else
+	u8 bus;
+	u8 devfn;
+	u16 pfsid;
+	u8 ats_qdep;
+	unsigned int index;
+#endif
 	u16 domain_id;
 	ioasid_t pasid;
 	unsigned int users;
 };
 
+#ifndef __PKVM_HYP__
 int cache_tag_assign(struct dmar_domain *domain, u16 did, struct device *dev,
 		     ioasid_t pasid, enum cache_tag_type type);
 int cache_tag_assign_domain(struct dmar_domain *domain,
 			    struct device *dev, ioasid_t pasid);
 void cache_tag_unassign_domain(struct dmar_domain *domain,
 			       struct device *dev, ioasid_t pasid);
+#else
+int cache_tag_assign_domain(struct dmar_domain *domain, u16 did,
+			    struct pkvm_device *dev, ioasid_t pasid);
+void cache_tag_unassign_domain(struct dmar_domain *domain, u16 did,
+			       struct pkvm_device *dev, ioasid_t pasid);
+#endif
 void cache_tag_flush_range(struct dmar_domain *domain, unsigned long start,
 			   unsigned long end, int ih);
 void cache_tag_flush_all(struct dmar_domain *domain);

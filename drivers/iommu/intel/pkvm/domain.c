@@ -34,6 +34,9 @@ int pkvm_iommu_domain_init(void)
 	passthrough_domain.root_pa = pkvm_host_ept_root();
 	passthrough_domain.agaw = level - 2;
 	pkvm_spin_lock_init(&passthrough_domain.lock);
+	pkvm_spin_lock_init(&passthrough_domain.cache_lock);
+	INIT_LIST_HEAD(&passthrough_domain.cache_tags);
+	passthrough_domain.qi_batch = &passthrough_domain._qi_batch;
 
 	return 0;
 }
@@ -118,6 +121,9 @@ pkvm_alloc_iommu_domain(phys_addr_t root, u8 agaw, bool use_first_level)
 	domain->index = index;
 	atomic_set(&domain->refcount, 1);
 	pkvm_spin_lock_init(&domain->lock);
+	pkvm_spin_lock_init(&domain->cache_lock);
+	INIT_LIST_HEAD(&domain->cache_tags);
+	domain->qi_batch = &domain->_qi_batch;
 	hash_add(iommu_domain_hash, &domain->hnode, root);
 
 out_unlock:
