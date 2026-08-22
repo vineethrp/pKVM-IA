@@ -8,6 +8,7 @@
 #include "pkvm/mmu.h"
 #include "pkvm/memory.h"
 #include "pkvm/pkvm.h"
+#include "pkvm/vmx/ept.h"
 #include "pkvm/debug.h"
 #include "../iommu.h"
 #include "../pasid.h"
@@ -231,6 +232,61 @@ int pkvm_iommu_pasid_setup_fl(struct pasid_setup_fl_data *in,
 			      struct pasid_setup_fl_data *out)
 {
 	int ret = iommu_pasid_setup_fl(in);
+
+	*out = *in;
+	return ret;
+}
+
+static int iommu_pasid_setup_sl(struct pasid_setup_sl_data *data)
+{
+	struct intel_iommu *iommu = iommu_from_phys(data->phys);
+	struct device_domain_info info = {};
+	struct dmar_domain domain = {};
+	phys_addr_t root;
+	int level;
+	int ret;
+
+	if (!iommu || !iommu->root_entry || !sm_supported(iommu))
+		return -EINVAL;
+
+	if (data->did == FLPT_DEFAULT_DID) {
+		if (data->root_gpa)
+			return -EINVAL;
+		root = pkvm_host_ept_root();
+		level = pkvm_host_ept_level();
+		if (root == INVALID_PAGE || level < 2 || level > 5)
+			return -EINVAL;
+		domain.agaw = level - 2;
+	} else {
+		root = pkvm_host_gpa_to_phys(data->root_gpa);
+		if (!root || !PAGE_ALIGNED(root) || data->agaw > 3)
+			return -EINVAL;
+		domain.agaw = data->agaw;
+	}
+
+	if (!(cap_sagaw(iommu->cap) & BIT(domain.agaw)))
+		return -EINVAL;
+	domain.root_pa = root;
+	domain.use_first_level = false;
+
+	info.segment = data->segment;
+	info.bus = data->bus;
+	info.devfn = data->devfn;
+	info.iommu = iommu;
+
+	ret = accept_page_donation(iommu, &data->donation_page_gpa);
+	if (ret)
+		return ret;
+
+	ret = intel_pasid_setup_second_level(iommu, &domain, &info,
+					     data->did, data->pasid);
+	return ret;
+}
+
+int pkvm_iommu_pasid_setup_sl(struct pasid_setup_sl_data *in,
+			      struct pasid_setup_sl_data *out)
+{
+	int ret = iommu_pasid_setup_sl(in);
 
 	*out = *in;
 	return ret;

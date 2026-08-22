@@ -546,10 +546,14 @@ int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 #ifndef __PKVM_HYP__
 				   struct device *dev, u32 pasid)
 #else
-				   struct pkvm_device *dev, u16 did, u32 pasid)
+				   struct device_domain_info *info,
+				   u16 did, u32 pasid)
 #endif
 {
 	struct pasid_entry *pte;
+#ifdef __PKVM_HYP__
+	struct pkvm_device *dev;
+#endif
 #ifndef __PKVM_HYP__
 	u16 did;
 
@@ -570,6 +574,14 @@ int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 #endif
 
 	spin_lock(&iommu->lock);
+#ifdef __PKVM_HYP__
+	dev = pkvm_get_iommu_device(iommu, info->segment,
+				    info->bus, info->devfn);
+	if (IS_ERR(dev)) {
+		spin_unlock(&iommu->lock);
+		return PTR_ERR(dev);
+	}
+#endif
 	pte = intel_pasid_get_entry(dev, pasid);
 	if (IS_ERR(pte)) {
 		spin_unlock(&iommu->lock);
@@ -580,6 +592,13 @@ int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 		spin_unlock(&iommu->lock);
 		return -EBUSY;
 	}
+
+#ifdef __PKVM_HYP__
+	if (intel_domain_is_fs_paging(domain)) {
+		spin_unlock(&iommu->lock);
+		return -EINVAL;
+	}
+#endif
 
 	pasid_pte_config_second_level(iommu, pte, domain, did);
 	spin_unlock(&iommu->lock);
