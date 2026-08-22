@@ -136,6 +136,8 @@ struct pkvm_device *
 pkvm_get_iommu_device(struct intel_iommu *iommu, u32 segment,
 		      u8 bus, u8 devfn);
 void pkvm_remove_iommu_device(struct pkvm_device *device);
+struct cache_tag *pkvm_alloc_cache_tag(void);
+void pkvm_free_cache_tag(struct cache_tag *tag);
 
 int pkvm_intel_iommu_init(void);
 int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val);
