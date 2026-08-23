@@ -206,13 +206,16 @@ static void set_host_mem_pgstate(unsigned long phys, unsigned long size,
 
 static int check_host_mem_state_mask(unsigned long phys, unsigned long size,
 				     unsigned long states,
-				     enum pkvm_owner_id owner)
+				     enum pkvm_owner_id owner,
+				     bool check_zero_refcount)
 {
 	if (!is_memory_range(phys, size))
 		return -EINVAL;
 
 	for_each_pkvm_page(page, phys, size) {
 		if (!(BIT(page->host_state) & states) || page->owner != owner)
+			return -EPERM;
+		if (check_zero_refcount && page->refcount)
 			return -EPERM;
 	}
 
@@ -221,9 +224,11 @@ static int check_host_mem_state_mask(unsigned long phys, unsigned long size,
 
 static int check_host_mem_state(unsigned long phys, unsigned long size,
 				enum pkvm_page_state state,
-				enum pkvm_owner_id owner)
+				enum pkvm_owner_id owner,
+				bool check_zero_refcount)
 {
-	return check_host_mem_state_mask(phys, size, BIT(state), owner);
+	return check_host_mem_state_mask(phys, size, BIT(state), owner,
+					 check_zero_refcount);
 }
 
 struct page_ownership {
@@ -549,7 +554,7 @@ static int host_reclaim_guest_walker(struct pkvm_pgtable_visit_ctx *ctx,
 	case PKVM_PAGE_OWNED:
 		BUG_ON(!pkvm_is_protected_vm(kvm));
 		ret = check_host_mem_state(phys, size, PKVM_PAGE_NONE,
-					   PKVM_ID_GUEST);
+					   PKVM_ID_GUEST, true);
 		if (WARN_ON_ONCE(ret))
 			return ret;
 		/*
@@ -562,7 +567,7 @@ static int host_reclaim_guest_walker(struct pkvm_pgtable_visit_ctx *ctx,
 		BUG_ON(!pkvm_is_protected_vm(kvm));
 		ret = check_host_mem_state(phys, size,
 					   PKVM_PAGE_SHARED_BORROWED,
-					   PKVM_ID_GUEST);
+					   PKVM_ID_GUEST, true);
 		if (WARN_ON_ONCE(ret))
 			return ret;
 		/*
@@ -574,7 +579,7 @@ static int host_reclaim_guest_walker(struct pkvm_pgtable_visit_ctx *ctx,
 		BUG_ON(pkvm_is_protected_vm(kvm));
 		ret = check_host_mem_state(phys, size,
 					   PKVM_PAGE_SHARED_OWNED,
-					   PKVM_ID_HOST);
+					   PKVM_ID_HOST, false);
 		if (WARN_ON_ONCE(ret))
 			return ret;
 		break;
@@ -681,7 +686,7 @@ static int __check_guest_host_state(unsigned long gpa, unsigned long hpa,
 				    host_state == PKVM_PAGE_SHARED_OWNED) ?
 				   PKVM_ID_HOST : PKVM_ID_GUEST;
 
-	return check_host_mem_state(hpa, size, host_state, owner);
+	return check_host_mem_state(hpa, size, host_state, owner, false);
 }
 
 static int check_guest_host_state(struct pkvm_vm *pkvm_vm,
@@ -1087,7 +1092,8 @@ int pkvm_host_donate_hyp(unsigned long phys, unsigned long size, bool clear)
 
 	pkvm_host_mmu_lock();
 
-	ret = check_host_mem_state(phys, size, PKVM_PAGE_OWNED, PKVM_ID_HOST);
+	ret = check_host_mem_state(phys, size, PKVM_PAGE_OWNED, PKVM_ID_HOST,
+				   true);
 	if (ret)
 		goto unlock;
 
@@ -1144,7 +1150,8 @@ int pkvm_host_donate_hyp_share_ro(unsigned long phys, unsigned long size,
 
 	pkvm_host_mmu_lock();
 
-	ret = check_host_mem_state(phys, size, PKVM_PAGE_OWNED, PKVM_ID_HOST);
+	ret = check_host_mem_state(phys, size, PKVM_PAGE_OWNED, PKVM_ID_HOST,
+				   true);
 	if (ret)
 		goto unlock;
 
@@ -1196,7 +1203,8 @@ void pkvm_hyp_donate_host(unsigned long phys, unsigned long size, bool clear)
 
 	pkvm_host_mmu_lock();
 
-	ret = check_host_mem_state_mask(phys, size, states, PKVM_ID_HYP);
+	ret = check_host_mem_state_mask(phys, size, states, PKVM_ID_HYP,
+					false);
 	if (ret)
 		goto unlock;
 
@@ -1362,7 +1370,7 @@ void pkvm_host_unshare_hyp(unsigned long phys, unsigned long size)
 	pkvm_host_mmu_lock();
 
 	ret = check_host_mem_state(phys, size, PKVM_PAGE_SHARED_OWNED,
-				   PKVM_ID_HOST);
+				   PKVM_ID_HOST, false);
 	if (ret)
 		goto unlock;
 
@@ -1433,7 +1441,8 @@ int pkvm_host_donate_guest(struct kvm_vcpu *vcpu, unsigned long gpa,
 	pkvm_host_mmu_lock();
 	pkvm_guest_mmu_lock(pkvm_vm);
 
-	ret = check_host_mem_state(hpa, size, PKVM_PAGE_OWNED, PKVM_ID_HOST);
+	ret = check_host_mem_state(hpa, size, PKVM_PAGE_OWNED, PKVM_ID_HOST,
+				   true);
 	if (ret)
 		goto unlock;
 
@@ -1759,4 +1768,92 @@ unlock:
 	pkvm_host_mmu_unlock();
 
 	return ret;
+}
+
+/**
+ * pkvm_host_use_dma() - Pin host pages to be used for DMA
+ * @phys: Physical address of the memory region to pin
+ * @size: Size of the memory region to pin
+ *
+ * Validate that the host may use [@phys, @phys + @size) for DMA and pin
+ * normal-memory pages by incrementing their pKVM vmemmap refcounts. This
+ * prevents the host from donating a page while a device can still access it.
+ *
+ * Both PKVM_PAGE_OWNED and PKVM_PAGE_SHARED_OWNED pages owned by the host are
+ * accepted. Shared-owned pages cannot be donated in their current state, but
+ * are refcounted as well so that all DMA mappings have the same lifetime rule.
+ *
+ * Return: 0 on success, or a negative error code on failure.
+ */
+int pkvm_host_use_dma(unsigned long phys, unsigned long size)
+{
+	int ret;
+
+	if (!is_valid_addr_range(phys, size, true))
+		return -EINVAL;
+
+	pkvm_host_mmu_lock();
+
+	if (is_memory_range(phys, size)) {
+		ret = check_host_mem_state_mask(phys, size,
+						BIT(PKVM_PAGE_OWNED) |
+						BIT(PKVM_PAGE_SHARED_OWNED),
+						PKVM_ID_HOST, false);
+		if (ret)
+			goto unlock;
+
+		for_each_pkvm_page(page, phys, size)
+			pkvm_page_ref_inc(page);
+	} else if (is_mmio_range(phys, size)) {
+		/*
+		 * Reserved memory, including RMRRs, may be used for DMA. MMIO
+		 * pages have no pKVM vmemmap refcount, so validate host access
+		 * instead. This is safe while device assignment is unsupported
+		 * and MMIO ownership cannot change at runtime.
+		 */
+		ret = check_page_state(&host_mmu, phys, size, PKVM_PAGE_OWNED);
+	} else {
+		/* Do not accept ranges mixing normal and reserved memory. */
+		ret = -EINVAL;
+	}
+unlock:
+	pkvm_host_mmu_unlock();
+
+	return ret;
+}
+
+/**
+ * pkvm_host_unuse_dma() - Unpin host pages previously pinned for DMA
+ * @phys: Physical address of the memory region to unpin
+ * @size: Size of the memory region to unpin
+ *
+ * Drop one DMA reference from each normal-memory page in the range. Once all
+ * DMA users have released a page, its zero refcount allows donation again.
+ */
+void pkvm_host_unuse_dma(unsigned long phys, unsigned long size)
+{
+	unsigned long states = BIT(PKVM_PAGE_OWNED) |
+			       BIT(PKVM_PAGE_SHARED_OWNED);
+	int ret;
+
+	if (WARN_ON_ONCE(!is_valid_addr_range(phys, size, true)))
+		return;
+
+	if (is_mmio_range(phys, size))
+		return;
+
+	if (WARN_ON_ONCE(!is_memory_range(phys, size)))
+		return;
+
+	pkvm_host_mmu_lock();
+
+	ret = check_host_mem_state_mask(phys, size, states, PKVM_ID_HOST,
+					false);
+	if (WARN_ON_ONCE(ret))
+		goto unlock;
+
+	for_each_pkvm_page(page, phys, size)
+		pkvm_page_ref_dec(page);
+unlock:
+	pkvm_host_mmu_unlock();
 }
