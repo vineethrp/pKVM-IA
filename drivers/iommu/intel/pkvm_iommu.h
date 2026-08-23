@@ -127,6 +127,7 @@ bool is_dev_in_satc(u16 segment, u16 bdf);
 int pkvm_iommu_domain_init(void);
 void pkvm_iommu_pgtable_init(struct dmar_domain *domain,
 			     unsigned int allowed_pgsz);
+int pkvm_iommu_pgtable_destroy(struct dmar_domain *domain);
 struct dmar_domain *
 pkvm_alloc_iommu_domain(struct intel_iommu *iommu, phys_addr_t root, u8 agaw,
 			bool use_first_level);
@@ -134,7 +135,8 @@ struct dmar_domain *
 pkvm_get_iommu_domain(phys_addr_t root, u16 did,
 		      struct intel_iommu *iommu);
 void pkvm_put_iommu_domain(struct dmar_domain *domain);
-int pkvm_free_iommu_domain(phys_addr_t root);
+int pkvm_free_iommu_domain(phys_addr_t root,
+			   struct pkvm_memcache *teardown_mc);
 struct pkvm_device *
 pkvm_alloc_iommu_device(const struct device_domain_info *info);
 struct pkvm_device *
@@ -151,7 +153,7 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val);
 int pkvm_iommu_qi_submit(u64 phys, u64 desc_gpa, u32 count, u32 options);
 int pkvm_iommu_alloc_domain(u64 iommu_phys, u64 root_gpa, u8 agaw,
 			    bool use_first_level);
-int pkvm_iommu_free_domain(u64 root_gpa);
+int pkvm_iommu_free_domain(u64 root_gpa, struct pkvm_memcache *mc);
 int pkvm_iommu_clear_ce(struct clear_ce_data *data);
 int pkvm_iommu_set_lm_ce(struct set_lm_ce_data *in,
 			 struct set_lm_ce_data *out);

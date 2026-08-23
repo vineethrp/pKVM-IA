@@ -186,9 +186,28 @@ int pkvm_alloc_domain(struct intel_iommu *iommu, void *root, u8 agaw,
 			      virt_to_phys(root), agaw, use_first_level);
 }
 
+static void *host_va(phys_addr_t phys)
+{
+	return __va(phys);
+}
+
+static void free_domain_memcache(struct pkvm_memcache *mc)
+{
+	while (mc->count)
+		iommu_free_pages(pop_pkvm_memcache_page(mc, host_va));
+}
+
 int pkvm_free_domain(void *root)
 {
-	return pkvm_hypercall(iommu_free_domain, virt_to_phys(root));
+	union pkvm_hc_data out;
+	int ret;
+
+	ret = pkvm_hypercall_out(iommu_free_domain, &out,
+				 virt_to_phys(root));
+	if (!ret)
+		free_domain_memcache(&out.iommu_free_domain.memcache);
+
+	return ret;
 }
 
 int pkvm_context_mapping(struct intel_iommu *iommu,
