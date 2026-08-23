@@ -804,6 +804,7 @@ struct pkvm_memcache {
 	} head;
 	unsigned long count;
 #define PKVM_MC_ACCOUNT_PGTABLE_PAGES	BIT(1)
+#define PKVM_MC_DONATE_SHARE_RO		BIT(2)
 	unsigned long flags;
 };
 
