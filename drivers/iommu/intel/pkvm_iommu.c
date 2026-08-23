@@ -210,6 +210,57 @@ int pkvm_free_domain(void *root)
 	return ret;
 }
 
+struct domain_mc_alloc_arg {
+	int nid;
+	gfp_t gfp;
+};
+
+static void *alloc_domain_memcache_page(void *arg)
+{
+	struct domain_mc_alloc_arg *alloc = arg;
+
+	return iommu_alloc_pages_node_sz(alloc->nid, alloc->gfp, PAGE_SIZE);
+}
+
+static phys_addr_t host_pa(void *addr)
+{
+	return virt_to_phys(addr);
+}
+
+int pkvm_domain_map(void *root, int nid, unsigned long iova,
+		    phys_addr_t phys, size_t size, unsigned int prot,
+		    gfp_t gfp)
+{
+	union pkvm_hc_data data = {};
+	struct iommu_domain_map_data *map = &data.iommu_domain_map.in;
+	struct domain_mc_alloc_arg alloc = {
+		.nid = nid,
+		.gfp = gfp,
+	};
+	unsigned long required_pages;
+	int ret;
+
+	map->root_gpa = virt_to_phys(root);
+	map->iova = iova;
+	map->phys = phys;
+	map->size = size;
+	map->prot = prot;
+	map->mc.flags = PKVM_MC_DONATE_SHARE_RO;
+
+	ret = pkvm_hypercall_inout(iommu_domain_map, &data, &data);
+	if (ret != -ENOMEM)
+		goto out;
+
+	required_pages = __pkvm_pgtable_max_pages(size >> PAGE_SHIFT);
+	ret = topup_pkvm_memcache(&map->mc, required_pages,
+				  alloc_domain_memcache_page, host_pa, &alloc);
+	if (!ret)
+		ret = pkvm_hypercall_inout(iommu_domain_map, &data, &data);
+out:
+	free_domain_memcache(&map->mc);
+	return ret;
+}
+
 int pkvm_context_mapping(struct intel_iommu *iommu,
 			 struct device_domain_info *info, u8 bus, u8 devfn,
 			 u64 root_gpa, u8 agaw, u16 did)
