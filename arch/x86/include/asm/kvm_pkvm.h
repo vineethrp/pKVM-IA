@@ -126,6 +126,15 @@ struct pasid_teardown_data {
 	u8 bus;
 	u8 devfn;
 };
+
+struct iommu_domain_map_data {
+	u64 root_gpa;
+	u64 iova;
+	u64 phys;
+	u64 size;
+	u64 prot;
+	struct pkvm_memcache mc;
+};
 #endif
 
 #define TO_PKVM_HC(f)		CONCATENATE(__pkvm__, f)
@@ -231,6 +240,10 @@ union pkvm_hc_data {
 	struct {
 		struct pkvm_memcache memcache;
 	} iommu_free_domain;
+	union {
+		struct iommu_domain_map_data in;
+		struct iommu_domain_map_data out;
+	} iommu_domain_map;
 #endif
 	struct {
 		bool has_intr;

@@ -160,6 +160,17 @@ pkvm_get_iommu_domain(phys_addr_t root, u16 did,
 	return domain;
 }
 
+struct dmar_domain *pkvm_get_iommu_domain_by_root(phys_addr_t root)
+{
+	struct dmar_domain *domain;
+
+	pkvm_spin_lock(&iommu_domain_lock);
+	domain = __pkvm_get_iommu_domain(root, true);
+	pkvm_spin_unlock(&iommu_domain_lock);
+
+	return domain;
+}
+
 void pkvm_put_iommu_domain(struct dmar_domain *domain)
 {
 	/* The static passthrough domain has a permanent lifetime. */

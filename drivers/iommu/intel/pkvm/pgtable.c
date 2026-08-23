@@ -3,8 +3,10 @@
 
 #include <linux/percpu.h>
 
-#include "pkvm/memory.h"
 #include "pkvm/pkvm.h"
+#include "pkvm/mem_protect.h"
+#include "pkvm/memory.h"
+#include "pkvm/mmu.h"
 
 #include "../iommu.h"
 
@@ -255,14 +257,118 @@ void pkvm_iommu_pgtable_init(struct dmar_domain *domain,
 	pkvm_set_page_refcounted(pkvm_phys_to_page(domain->root_pa));
 }
 
+static int iommu_pgtable_unuse_dma(struct pkvm_pgtable_visit_ctx *ctx,
+				   unsigned long flags, void *arg)
+{
+	const struct pkvm_pgtable_ops *pgt_ops = ctx->pgt->pgt_ops;
+	unsigned long phys;
+
+	if (!pgt_ops->pte_present(ctx->ptep))
+		return 0;
+
+	phys = pgt_ops->pte_to_phys(ctx->ptep);
+	pkvm_host_unuse_dma(phys, pgt_ops->level_to_size(ctx->level));
+
+	return 0;
+}
+
 int pkvm_iommu_pgtable_destroy(struct dmar_domain *domain)
 {
+	struct pkvm_pgtable_walker walker = {
+		.cb = iommu_pgtable_unuse_dma,
+		.arg = NULL,
+		.walk_flags = PKVM_PGTABLE_WALK_LEAF,
+	};
+	int ret;
+
 	if (WARN_ON_ONCE(current_iommu_domain))
 		return -EBUSY;
 
 	current_iommu_domain = domain;
+	ret = pkvm_pgtable_walk(&domain->pgt, 0,
+				pkvm_pgtable_max_size(&domain->pgt),
+				&walker);
+	if (ret)
+		goto out;
+
 	pkvm_pgtable_destroy(&domain->pgt);
+out:
 	current_iommu_domain = NULL;
 
-	return 0;
+	return ret;
+}
+
+int pkvm_iommu_pgtable_map(struct dmar_domain *domain, unsigned long iova,
+			   phys_addr_t phys, size_t size, u64 prot,
+			   struct pkvm_memcache *host_mc)
+{
+	phys_addr_t phys_end;
+	unsigned long iova_end;
+	unsigned long mapped_iova;
+	unsigned long required_pages;
+	int rollback_ret;
+	u64 pte_prot;
+	int ret;
+
+	if (!size || !PAGE_ALIGNED(iova) || !PAGE_ALIGNED(phys) ||
+	    !PAGE_ALIGNED(size) ||
+	    check_add_overflow(iova, size, &iova_end) ||
+	    iova_end > BIT_ULL(domain->iova_bits) ||
+	    check_add_overflow(phys, size, &phys_end) ||
+	    phys_end > BIT_ULL(52) ||
+	    prot > UINT_MAX ||
+	    !(prot & (IOMMU_READ | IOMMU_WRITE)))
+		return -EINVAL;
+
+	if (host_mc->flags != PKVM_MC_DONATE_SHARE_RO)
+		return -EINVAL;
+
+	pkvm_pgtable_lookup_range(&domain->pgt, iova, size, &mapped_iova,
+				  NULL, NULL, NULL);
+	if (mapped_iova != INVALID_PAGE)
+		return -EEXIST;
+
+	required_pages = __pkvm_pgtable_max_pages(size >> PAGE_SHIFT);
+	if (host_mc->count > required_pages)
+		return -EINVAL;
+
+	if (host_mc->count) {
+		ret = pkvm_refill_memcache(&domain->mc,
+					   domain->mc.count + host_mc->count,
+					   host_mc);
+		if (ret)
+			return ret;
+	}
+
+	if (domain->mc.count < required_pages)
+		return -ENOMEM;
+
+	if (WARN_ON_ONCE(current_iommu_domain))
+		return -EBUSY;
+
+	pte_prot = domain->pgt.pgt_ops->calc_pte_perm(prot & IOMMU_READ,
+						       prot & IOMMU_WRITE,
+						       false);
+	ret = pkvm_host_use_dma(phys, size);
+	if (ret)
+		return ret;
+
+	current_iommu_domain = domain;
+	ret = pkvm_pgtable_map(&domain->pgt, iova, phys, size, pte_prot,
+			       &domain->mc);
+	if (WARN_ON(ret)) {
+		/*
+		 * The range was verified empty and enough page-table pages were
+		 * reserved for the worst case, so a failure after installing any
+		 * mappings indicates a bug. Roll the whole range back defensively.
+		 */
+		rollback_ret = pkvm_pgtable_unmap(&domain->pgt, iova,
+						  INVALID_PAGE, size);
+		WARN_ON_ONCE(rollback_ret);
+	}
+	current_iommu_domain = NULL;
+	if (ret && !rollback_ret)
+		pkvm_host_unuse_dma(phys, size);
+
+	return ret;
 }

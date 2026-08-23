@@ -2183,6 +2183,10 @@ void pkvm_handle_host_hypercall(struct kvm_vcpu *vcpu)
 	case __pkvm__iommu_pasid_teardown:
 		ret = pkvm_iommu_pasid_teardown(&in.iommu_pasid_teardown.data);
 		break;
+	case __pkvm__iommu_domain_map:
+		ret = pkvm_iommu_domain_map(&in.iommu_domain_map.in,
+					    &out.iommu_domain_map.out);
+		break;
 #endif
 	default:
 		ret = pkvm_vcpu_handle_host_hypercall(vcpu, hc, &in, &out);

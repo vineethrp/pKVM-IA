@@ -65,6 +65,38 @@ int pkvm_iommu_free_domain(u64 root_gpa, struct pkvm_memcache *mc)
 	return ret;
 }
 
+static int iommu_domain_map(struct iommu_domain_map_data *data)
+{
+	phys_addr_t root = pkvm_host_gpa_to_phys(data->root_gpa);
+	struct dmar_domain *domain;
+	int ret;
+
+	if (!root || !PAGE_ALIGNED(root))
+		return -EINVAL;
+
+	domain = pkvm_get_iommu_domain_by_root(root);
+	if (!domain)
+		return -EINVAL;
+
+	pkvm_spin_lock(&domain->lock);
+	ret = pkvm_iommu_pgtable_map(domain, data->iova, data->phys,
+				     data->size, data->prot,
+				     &data->mc);
+	pkvm_spin_unlock(&domain->lock);
+	pkvm_put_iommu_domain(domain);
+
+	return ret;
+}
+
+int pkvm_iommu_domain_map(struct iommu_domain_map_data *in,
+			  struct iommu_domain_map_data *out)
+{
+	int ret = iommu_domain_map(in);
+
+	*out = *in;
+	return ret;
+}
+
 int pkvm_iommu_clear_ce(struct clear_ce_data *data)
 {
 	struct intel_iommu *iommu = iommu_from_phys(data->phys);
