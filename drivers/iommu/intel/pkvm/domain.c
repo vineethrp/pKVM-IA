@@ -4,6 +4,7 @@
 #include <linux/hashtable.h>
 
 #include "pkvm/debug.h"
+#include "pkvm/memory.h"
 #include "pkvm/pkvm.h"
 #include "pkvm/vmx/ept.h"
 
@@ -168,6 +169,20 @@ void pkvm_put_iommu_domain(struct dmar_domain *domain)
 	WARN_ON_ONCE(atomic_dec_if_positive(&domain->refcount) <= 0);
 }
 
+static void free_domain_memcache(struct dmar_domain *domain,
+				 struct pkvm_memcache *teardown_mc)
+{
+	struct pkvm_memcache *mc = &domain->mc;
+
+	while (mc->count) {
+		void *page = pop_pkvm_memcache_page(mc, pkvm_phys_to_virt);
+
+		push_pkvm_memcache_page(teardown_mc, page,
+					pkvm_virt_to_host_gpa);
+		pkvm_hyp_donate_host(__pkvm_pa(page), VTD_PAGE_SIZE, false);
+	}
+}
+
 struct dmar_domain *
 pkvm_alloc_iommu_domain(struct intel_iommu *iommu, phys_addr_t root, u8 agaw,
 			bool use_first_level)
@@ -219,7 +234,8 @@ out_unlock:
 	return domain;
 }
 
-int pkvm_free_iommu_domain(phys_addr_t root)
+int pkvm_free_iommu_domain(phys_addr_t root,
+			   struct pkvm_memcache *teardown_mc)
 {
 	struct dmar_domain *domain;
 	int ret = 0;
@@ -236,6 +252,13 @@ int pkvm_free_iommu_domain(phys_addr_t root)
 		goto out_unlock;
 	}
 
+	ret = pkvm_iommu_pgtable_destroy(domain);
+	if (ret) {
+		atomic_set(&domain->refcount, 1);
+		goto out_unlock;
+	}
+
+	free_domain_memcache(domain, teardown_mc);
 	hash_del(&domain->hnode);
 	__clear_bit(domain->index, iommu_domain_bitmap);
 	memset(domain, 0, sizeof(*domain));

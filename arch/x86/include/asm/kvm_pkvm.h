@@ -228,6 +228,9 @@ union pkvm_hc_data {
 	struct {
 		struct pasid_teardown_data data;
 	} iommu_pasid_teardown;
+	struct {
+		struct pkvm_memcache memcache;
+	} iommu_free_domain;
 #endif
 	struct {
 		bool has_intr;

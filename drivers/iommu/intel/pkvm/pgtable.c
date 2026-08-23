@@ -249,8 +249,20 @@ void pkvm_iommu_pgtable_init(struct dmar_domain *domain,
 		domain->pgt.pgt_ops = &iommu_sl_pgtable_ops;
 	}
 
-	/* TODO: Refcount the root before enabling map/unmap. */
 	domain->pgt.root_pa = domain->root_pa;
 	domain->pgt.cap = cap;
 	domain->pgt.mm_ops = &iommu_pgtable_mm_ops;
+	pkvm_set_page_refcounted(pkvm_phys_to_page(domain->root_pa));
+}
+
+int pkvm_iommu_pgtable_destroy(struct dmar_domain *domain)
+{
+	if (WARN_ON_ONCE(current_iommu_domain))
+		return -EBUSY;
+
+	current_iommu_domain = domain;
+	pkvm_pgtable_destroy(&domain->pgt);
+	current_iommu_domain = NULL;
+
+	return 0;
 }

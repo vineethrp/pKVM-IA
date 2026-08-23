@@ -36,26 +36,33 @@ int pkvm_iommu_alloc_domain(u64 iommu_phys, u64 root_gpa, u8 agaw,
 	phys_addr_t root = pkvm_host_gpa_to_phys(root_gpa);
 	struct intel_iommu *iommu = iommu_from_phys(iommu_phys);
 	struct dmar_domain *domain;
+	int ret;
 
 	if (!iommu)
 		return -EINVAL;
 
-	/*
-	 * TODO: Protect and refcount the root after page-table updates are
-	 * routed through pKVM.
-	 */
+	ret = pkvm_host_donate_hyp_share_ro(root, VTD_PAGE_SIZE, true);
+	if (ret)
+		return ret;
+
 	domain = pkvm_alloc_iommu_domain(iommu, root, agaw, use_first_level);
-	if (IS_ERR(domain))
+	if (IS_ERR(domain)) {
+		pkvm_hyp_donate_host(root, VTD_PAGE_SIZE, false);
 		return PTR_ERR(domain);
+	}
 
 	return 0;
 }
 
-int pkvm_iommu_free_domain(u64 root_gpa)
+int pkvm_iommu_free_domain(u64 root_gpa, struct pkvm_memcache *mc)
 {
 	phys_addr_t root = pkvm_host_gpa_to_phys(root_gpa);
+	int ret;
 
-	return pkvm_free_iommu_domain(root);
+	memset(mc, 0, sizeof(*mc));
+	ret = pkvm_free_iommu_domain(root, mc);
+
+	return ret;
 }
 
 int pkvm_iommu_clear_ce(struct clear_ce_data *data)
