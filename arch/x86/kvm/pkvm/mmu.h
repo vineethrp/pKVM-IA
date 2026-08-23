@@ -39,6 +39,8 @@ int pkvm_guest_mmu_max_level(void);
 int pkvm_guest_mmu_init(struct pkvm_vm *pkvm_vm, phys_addr_t pgd_pa);
 void pkvm_guest_mmu_destroy(struct pkvm_vm *pkvm_vm);
 int pkvm_guest_mmu_refill_memcache(struct pkvm_vcpu *pkvm_vcpu);
+int pkvm_refill_memcache(struct pkvm_memcache *mc, unsigned long min_pages,
+			 struct pkvm_memcache *host_mc);
 void pkvm_guest_mmu_free_memcache(struct pkvm_vcpu *pkvm_vcpu);
 
 #endif /* __PKVM_X86_MMU_H */

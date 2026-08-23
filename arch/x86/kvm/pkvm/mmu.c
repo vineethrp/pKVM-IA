@@ -463,7 +463,10 @@ static void drain_pool(struct pkvm_pool *pool, struct pkvm_memcache *host_mc)
 static void *admit_host_page(void *arg)
 {
 	struct pkvm_memcache *host_mc = arg;
+	bool share_ro = host_mc->flags & PKVM_MC_DONATE_SHARE_RO;
+	phys_addr_t addr;
 	void *page;
+	int ret;
 
 	if (!host_mc->count || WARN_ON_ONCE(host_mc->head.nr_pages != 1))
 		return NULL;
@@ -478,8 +481,10 @@ static void *admit_host_page(void *arg)
 	 * The page will be cleared by zalloc_page when allocating it from
 	 * the memcache, thus no need to clear it now.
 	 */
-	if (WARN_ON_ONCE(pkvm_host_donate_hyp(pkvm_host_gpa_to_phys(host_mc->head.addr),
-					      PAGE_SIZE, false)))
+	addr = pkvm_host_gpa_to_phys(host_mc->head.addr);
+	ret = share_ro ? pkvm_host_donate_hyp_share_ro(addr, PAGE_SIZE, false) :
+			 pkvm_host_donate_hyp(addr, PAGE_SIZE, false);
+	if (WARN_ON_ONCE(ret))
 		return NULL;
 
 	page = pop_pkvm_memcache_page(host_mc, pkvm_host_gpa_to_virt);
@@ -492,9 +497,8 @@ static void *admit_host_page(void *arg)
 	return page;
 }
 
-/* Refill our local memcache by popping pages from the one provided by the host. */
-static int refill_memcache(struct pkvm_memcache *mc, unsigned long min_pages,
-			   struct pkvm_memcache *host_mc)
+int pkvm_refill_memcache(struct pkvm_memcache *mc, unsigned long min_pages,
+			 struct pkvm_memcache *host_mc)
 {
 	/*
 	 * The host mc is shared and can be modified by the host while popping.
@@ -995,8 +999,8 @@ int pkvm_guest_mmu_refill_memcache(struct pkvm_vcpu *pkvm_vcpu)
 
 	host_mc = &pkvm_vcpu->shared_vcpu->arch.pkvm.guest_mmu_memcache;
 
-	return refill_memcache(&vcpu->arch.pkvm.guest_mmu_memcache,
-			       READ_ONCE(host_mc->count), host_mc);
+	return pkvm_refill_memcache(&vcpu->arch.pkvm.guest_mmu_memcache,
+				    READ_ONCE(host_mc->count), host_mc);
 }
 
 void pkvm_guest_mmu_free_memcache(struct pkvm_vcpu *pkvm_vcpu)
