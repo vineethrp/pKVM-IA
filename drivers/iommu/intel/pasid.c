@@ -290,13 +290,16 @@ int intel_pasid_tear_down_entry(struct intel_iommu *iommu,
 #else
 int intel_pasid_tear_down_entry(struct intel_iommu *iommu,
 				struct pkvm_device *dev, u32 pasid,
-				bool fault_ignore)
+				bool fault_ignore,
+				struct dmar_domain **domain)
 #endif
 {
 	struct pasid_entry *pte;
 	u16 did, pgtt;
 #ifdef __PKVM_HYP__
-	struct dmar_domain *domain = NULL;
+	phys_addr_t root;
+
+	*domain = NULL;
 #endif
 
 #ifndef __PKVM_HYP__
@@ -358,14 +361,16 @@ int intel_pasid_tear_down_entry(struct intel_iommu *iommu,
 	did = pasid_get_domain_id(pte);
 	pgtt = pasid_pte_get_pgtt(pte);
 #ifdef __PKVM_HYP__
-	if (pgtt != PASID_ENTRY_PGTT_FL_ONLY &&
-	    pgtt != PASID_ENTRY_PGTT_SL_ONLY)
+	if (pgtt == PASID_ENTRY_PGTT_FL_ONLY)
+		root = pasid_get_flptr(pte);
+	else if (pgtt == PASID_ENTRY_PGTT_SL_ONLY)
+		root = pasid_get_slptr(pte);
+	else
 		return -EINVAL;
-	if (did == FLPT_DEFAULT_DID) {
-		domain = pkvm_get_iommu_domain(0, did, iommu);
-		if (!domain)
-			return -ENOENT;
-	}
+
+	*domain = pkvm_find_iommu_domain(root, did, iommu);
+	if (WARN_ON_ONCE(!*domain))
+		return -ENOENT;
 #endif
 	pasid_clear_present(pte);
 #ifndef __PKVM_HYP__
@@ -391,10 +396,7 @@ int intel_pasid_tear_down_entry(struct intel_iommu *iommu,
 	if (!fault_ignore)
 		intel_iommu_drain_pasid_prq(dev, pasid);
 #else
-	if (domain) {
-		cache_tag_unassign_domain(domain, did, dev, pasid);
-		pkvm_put_iommu_domain(domain);
-	}
+	cache_tag_unassign_domain(*domain, did, dev, pasid);
 #endif
 
 	return 0;
@@ -500,6 +502,7 @@ int intel_pasid_setup_first_level(struct intel_iommu *iommu,
 	struct pasid_entry *pte;
 #ifdef __PKVM_HYP__
 	struct pkvm_device *dev;
+	int ret;
 #endif
 
 	if (!ecap_flts(iommu->ecap)) {
@@ -555,8 +558,13 @@ int intel_pasid_setup_first_level(struct intel_iommu *iommu,
 		spin_unlock(&iommu->lock);
 		return -EINVAL;
 	}
-#endif
 
+	ret = cache_tag_assign_domain(domain, did, dev, pasid);
+	if (ret) {
+		spin_unlock(&iommu->lock);
+		return ret;
+	}
+#endif
 	pasid_pte_config_first_level(iommu, pte, fsptptr, did, flags);
 
 	spin_unlock(&iommu->lock);
@@ -582,11 +590,22 @@ static void pasid_pte_config_second_level(struct intel_iommu *iommu,
 
 	lockdep_assert_held(&iommu->lock);
 
+#ifdef CONFIG_PKVM_INTEL
+	if (pkvm_enabled()) {
+		root = virt_to_phys(domain->pkvm_root);
+		agaw = domain->pkvm_agaw;
+		page_snoop = ecap_smpwc(iommu->ecap);
+		goto domain_info_ready;
+	}
+#endif
 	pt_iommu_vtdss_hw_info(&domain->sspt, &pt_info);
 	root = pt_info.ssptptr;
 	agaw = pt_info.aw;
 	page_snoop = !(domain->sspt.vtdss_pt.common.features &
 			 BIT(PT_FEAT_DMA_INCOHERENT));
+#ifdef CONFIG_PKVM_INTEL
+domain_info_ready:
+#endif
 	dirty_tracking = domain->dirty_tracking;
 #else
 	root = domain->root_pa;
@@ -620,6 +639,7 @@ int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 	struct pasid_entry *pte;
 #ifdef __PKVM_HYP__
 	struct pkvm_device *dev;
+	int ret;
 #endif
 #ifndef __PKVM_HYP__
 	u16 did;
@@ -641,14 +661,12 @@ int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 #ifdef CONFIG_PKVM_INTEL
 	if (pkvm_enabled()) {
 		struct device_domain_info *info = dev_iommu_priv_get(dev);
-		struct pt_iommu_vtdss_hw_info pt_info;
 		int ret;
 
 		if (!info || !info->pasid_table)
 			return -ENODEV;
 
-		pt_iommu_vtdss_hw_info(&domain->sspt, &pt_info);
-		ret = pkvm_pasid_setup_sl(info, pt_info.ssptptr, pt_info.aw,
+		ret = pkvm_pasid_setup_sl(info, virt_to_phys(domain->pkvm_root),
 					  pasid, did);
 		if (ret)
 			pr_err("%s: iommu%d: protected second-level PASID setup failed: %d\n",
@@ -684,16 +702,12 @@ int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 		return -EINVAL;
 	}
 
-	if (did == FLPT_DEFAULT_DID) {
-		int ret = cache_tag_assign_domain(domain, did, dev, pasid);
-
-		if (ret) {
-			spin_unlock(&iommu->lock);
-			return ret;
-		}
+	ret = cache_tag_assign_domain(domain, did, dev, pasid);
+	if (ret) {
+		spin_unlock(&iommu->lock);
+		return ret;
 	}
 #endif
-
 	pasid_pte_config_second_level(iommu, pte, domain, did);
 	spin_unlock(&iommu->lock);
 
@@ -802,7 +816,7 @@ int intel_pasid_setup_pass_through(struct intel_iommu *iommu,
 		if (!info || !info->pasid_table)
 			return -ENODEV;
 
-		ret = pkvm_pasid_setup_sl(info, 0, 0, pasid, did);
+		ret = pkvm_pasid_setup_sl(info, 0, pasid, did);
 		if (ret)
 			pr_err("%s: iommu%d: protected passthrough PASID setup failed: %d\n",
 			       __func__, iommu->seq_id, ret);

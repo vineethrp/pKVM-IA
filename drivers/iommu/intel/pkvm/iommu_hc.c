@@ -8,7 +8,6 @@
 #include "pkvm/mmu.h"
 #include "pkvm/memory.h"
 #include "pkvm/pkvm.h"
-#include "pkvm/vmx/ept.h"
 #include "pkvm/debug.h"
 #include "../iommu.h"
 #include "../pasid.h"
@@ -122,6 +121,8 @@ int pkvm_iommu_clear_ce(struct clear_ce_data *data)
 {
 	struct intel_iommu *iommu = iommu_from_phys(data->phys);
 	struct device_domain_info info = {};
+	struct dmar_domain *domain;
+	int ret;
 
 	if (!iommu)
 		return -EINVAL;
@@ -131,7 +132,12 @@ int pkvm_iommu_clear_ce(struct clear_ce_data *data)
 	info.devfn = data->devfn;
 	info.iommu = iommu;
 
-	return domain_context_clear_one(&info, data->bus, data->devfn);
+	ret = domain_context_clear_one(&info, data->bus, data->devfn,
+				       &domain);
+	if (!ret && domain)
+		pkvm_put_iommu_domain(domain);
+
+	return ret;
 }
 
 static int accept_page_donation(struct intel_iommu *iommu,
@@ -165,10 +171,8 @@ static int iommu_set_lm_ce(struct set_lm_ce_data *data)
 {
 	struct intel_iommu *iommu = iommu_from_phys(data->phys);
 	struct device_domain_info info = {};
-	struct dmar_domain domain = {};
-	struct dmar_domain *target = &domain;
+	struct dmar_domain *domain;
 	phys_addr_t root;
-	int level;
 	int ret;
 
 	if (!iommu || !iommu->root_entry || sm_supported(iommu))
@@ -186,34 +190,16 @@ static int iommu_set_lm_ce(struct set_lm_ce_data *data)
 	if (ret)
 		return ret;
 
-	if (data->did == FLPT_DEFAULT_DID) {
-		if (data->root_gpa)
-			return -EINVAL;
-		root = pkvm_host_ept_root();
-		level = pkvm_host_ept_level();
-		if (root == INVALID_PAGE || level < 2 || level > 5)
-			return -EINVAL;
-		domain.agaw = level - 2;
-	} else {
-		root = pkvm_host_gpa_to_phys(data->root_gpa);
-		if (!root || !PAGE_ALIGNED(root) || data->agaw > 3)
-			return -EINVAL;
-		domain.agaw = data->agaw;
-	}
-
-	if (!(cap_sagaw(iommu->cap) & BIT(domain.agaw)))
+	root = pkvm_host_gpa_to_phys(data->root_gpa);
+	domain = pkvm_get_iommu_domain(root, data->did, iommu);
+	if (!domain)
 		return -EINVAL;
-	domain.root_pa = root;
-	domain.use_first_level = false;
-	if (data->did == FLPT_DEFAULT_DID) {
-		target = pkvm_get_iommu_domain(0, data->did, iommu);
-		if (!target)
-			return -EINVAL;
-	}
 
-	ret = domain_context_mapping_one(target, &info, data->did);
-	if (target != &domain)
-		pkvm_put_iommu_domain(target);
+	ret = domain_context_mapping_one(domain, &info, data->did);
+	if (!ret)
+		return 0;
+
+	pkvm_put_iommu_domain(domain);
 	if (ret == -EEXIST)
 		ret = 0;
 
@@ -306,7 +292,7 @@ static int iommu_pasid_setup_fl(struct pasid_setup_fl_data *data)
 {
 	struct intel_iommu *iommu = iommu_from_phys(data->phys);
 	struct device_domain_info info = {};
-	struct dmar_domain domain = {};
+	struct dmar_domain *domain;
 	phys_addr_t fsptptr;
 	int ret;
 
@@ -324,8 +310,9 @@ static int iommu_pasid_setup_fl(struct pasid_setup_fl_data *data)
 	if (!fsptptr || !PAGE_ALIGNED(fsptptr))
 		return -EINVAL;
 
-	domain.root_pa = fsptptr;
-	domain.use_first_level = true;
+	domain = pkvm_get_iommu_domain(fsptptr, data->did, iommu);
+	if (!domain)
+		return -EINVAL;
 
 	info.segment = data->segment;
 	info.bus = data->bus;
@@ -334,11 +321,16 @@ static int iommu_pasid_setup_fl(struct pasid_setup_fl_data *data)
 
 	ret = accept_page_donation(iommu, &data->donation_page_gpa);
 	if (ret)
-		return ret;
+		goto out_put_domain;
 
-	ret = intel_pasid_setup_first_level(iommu, &info, &domain, fsptptr,
+	ret = intel_pasid_setup_first_level(iommu, &info, domain, fsptptr,
 					    data->pasid, data->did,
 					    data->flags);
+	if (!ret)
+		return 0;
+
+out_put_domain:
+	pkvm_put_iommu_domain(domain);
 	return ret;
 }
 
@@ -355,10 +347,8 @@ static int iommu_pasid_setup_sl(struct pasid_setup_sl_data *data)
 {
 	struct intel_iommu *iommu = iommu_from_phys(data->phys);
 	struct device_domain_info info = {};
-	struct dmar_domain domain = {};
-	struct dmar_domain *target = &domain;
+	struct dmar_domain *domain;
 	phys_addr_t root;
-	int level;
 	int ret;
 
 	if (!iommu || !iommu->root_entry || !sm_supported(iommu))
@@ -367,27 +357,16 @@ static int iommu_pasid_setup_sl(struct pasid_setup_sl_data *data)
 	if (data->did == FLPT_DEFAULT_DID) {
 		if (data->root_gpa)
 			return -EINVAL;
-		root = pkvm_host_ept_root();
-		level = pkvm_host_ept_level();
-		if (root == INVALID_PAGE || level < 2 || level > 5)
-			return -EINVAL;
-		domain.agaw = level - 2;
+		root = 0;
 	} else {
 		root = pkvm_host_gpa_to_phys(data->root_gpa);
-		if (!root || !PAGE_ALIGNED(root) || data->agaw > 3)
+		if (!root || !PAGE_ALIGNED(root))
 			return -EINVAL;
-		domain.agaw = data->agaw;
 	}
 
-	if (!(cap_sagaw(iommu->cap) & BIT(domain.agaw)))
+	domain = pkvm_get_iommu_domain(root, data->did, iommu);
+	if (!domain)
 		return -EINVAL;
-	domain.root_pa = root;
-	domain.use_first_level = false;
-	if (data->did == FLPT_DEFAULT_DID) {
-		target = pkvm_get_iommu_domain(0, data->did, iommu);
-		if (!target)
-			return -EINVAL;
-	}
 
 	info.segment = data->segment;
 	info.bus = data->bus;
@@ -396,12 +375,15 @@ static int iommu_pasid_setup_sl(struct pasid_setup_sl_data *data)
 
 	ret = accept_page_donation(iommu, &data->donation_page_gpa);
 	if (ret)
-		return ret;
+		goto out_put_domain;
 
-	ret = intel_pasid_setup_second_level(iommu, target, &info,
+	ret = intel_pasid_setup_second_level(iommu, domain, &info,
 					     data->did, data->pasid);
-	if (target != &domain)
-		pkvm_put_iommu_domain(target);
+	if (!ret)
+		return 0;
+
+out_put_domain:
+	pkvm_put_iommu_domain(domain);
 	return ret;
 }
 
@@ -417,6 +399,7 @@ int pkvm_iommu_pasid_setup_sl(struct pasid_setup_sl_data *in,
 int pkvm_iommu_pasid_teardown(struct pasid_teardown_data *data)
 {
 	struct intel_iommu *iommu = iommu_from_phys(data->phys);
+	struct dmar_domain *domain;
 	struct pkvm_device *device;
 	struct pasid_table *table;
 	int ret;
@@ -439,7 +422,10 @@ int pkvm_iommu_pasid_teardown(struct pasid_teardown_data *data)
 	}
 
 	/* Keep the device alive until all PASID invalidations complete. */
-	ret = intel_pasid_tear_down_entry(iommu, device, data->pasid, false);
+	ret = intel_pasid_tear_down_entry(iommu, device, data->pasid, false,
+					  &domain);
+	if (!ret && domain)
+		pkvm_put_iommu_domain(domain);
 
 out_unlock:
 	pkvm_spin_unlock(&iommu->lock);

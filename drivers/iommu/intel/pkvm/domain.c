@@ -175,6 +175,30 @@ struct dmar_domain *pkvm_get_iommu_domain_by_root(phys_addr_t root)
 	return domain;
 }
 
+/*
+ * Find the domain referenced by an active translation entry without taking
+ * another reference. The entry retains its setup-time reference until the
+ * teardown hypercall returns the domain and drops that reference.
+ */
+struct dmar_domain *
+pkvm_find_iommu_domain(phys_addr_t root, u16 did,
+		       struct intel_iommu *iommu)
+{
+	struct dmar_domain *domain;
+
+	if (did == FLPT_DEFAULT_DID)
+		return &passthrough_domain;
+
+	pkvm_spin_lock(&iommu_domain_lock);
+	domain = __pkvm_get_iommu_domain(root, false);
+	pkvm_spin_unlock(&iommu_domain_lock);
+
+	if (domain && !domain_compatible(domain, iommu))
+		return NULL;
+
+	return domain;
+}
+
 void pkvm_put_iommu_domain(struct dmar_domain *domain)
 {
 	/* The static passthrough domain has a permanent lifetime. */

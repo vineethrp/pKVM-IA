@@ -1227,16 +1227,25 @@ static int domain_context_mapping_one(struct dmar_domain *domain,
 	if (WARN_ON(!intel_domain_is_ss_paging(domain)))
 		return -EINVAL;
 
+#ifdef CONFIG_PKVM_INTEL
+	if (pkvm_enabled()) {
+		root = virt_to_phys(domain->pkvm_root);
+		agaw = domain->pkvm_agaw;
+		goto root_ready;
+	}
+#endif
 	pt_iommu_vtdss_hw_info(&domain->sspt, &pt_info);
 	root = pt_info.ssptptr;
 	agaw = pt_info.aw;
+#ifdef CONFIG_PKVM_INTEL
+root_ready:
+#endif
 
 	pr_debug("Set context mapping for %02x:%02x.%d\n",
 		bus, PCI_SLOT(devfn), PCI_FUNC(devfn));
 
 	if (pkvm_enabled()) {
-		ret = pkvm_context_mapping(iommu, info, bus, devfn, root, agaw,
-					   did);
+		ret = pkvm_context_mapping(iommu, info, bus, devfn, root, did);
 		if (ret)
 			pr_err("%s: iommu%d: protected context setup failed: %d\n",
 			       __func__, iommu->seq_id, ret);
@@ -1283,12 +1292,10 @@ static int domain_context_mapping_one(struct dmar_domain *domain,
 	}
 	device_allocated = true;
 	info = &device->info;
-	if (did == FLPT_DEFAULT_DID) {
-		ret = cache_tag_assign_domain(domain, did, device,
-					      IOMMU_NO_PASID);
-		if (ret)
-			goto out_unlock;
-	}
+	device->domain = domain;
+	ret = cache_tag_assign_domain(domain, did, device, IOMMU_NO_PASID);
+	if (ret)
+		goto out_unlock;
 #else
 	if (context_present(context) && !context_copied(iommu, bus, devfn))
 		goto out_unlock;
@@ -1399,14 +1406,14 @@ static void pasid_free_table(struct pasid_dir_entry *dir, int max_pde)
 static __maybe_unused int
 domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
 #else
-int domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
+int domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn,
+			     struct dmar_domain **domain)
 #endif
 {
 	struct intel_iommu *iommu = info->iommu;
 	struct context_entry *context;
 #ifdef __PKVM_HYP__
 	struct pkvm_device *device;
-	struct dmar_domain *domain = NULL;
 	struct pasid_dir_entry *pasid_dir = NULL;
 	int max_pde = 0;
 #endif
@@ -1424,6 +1431,9 @@ int domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
 #endif
 
 	spin_lock(&iommu->lock);
+#ifdef __PKVM_HYP__
+	*domain = NULL;
+#endif
 	context = iommu_context_addr(iommu, bus, devfn, 0);
 	if (!context)
 		goto out_unlock;
@@ -1438,6 +1448,7 @@ int domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
 		goto out_unlock;
 	}
 	info = &device->info;
+	*domain = device->domain;
 	if (sm_supported(iommu)) {
 		pasid_dir = __pkvm_va(context->lo & VTD_PAGE_MASK);
 		max_pde = get_pasid_dir_size(context);
@@ -1448,15 +1459,6 @@ int domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
 	}
 #endif
 	did = context_domain_id(context);
-#ifdef __PKVM_HYP__
-	if (did == FLPT_DEFAULT_DID) {
-		domain = pkvm_get_iommu_domain(0, did, iommu);
-		if (!domain) {
-			ret = -ENOENT;
-			goto out_unlock;
-		}
-	}
-#endif
 	context_clear_present(context);
 	__iommu_flush_cache(iommu, context, sizeof(*context));
 #ifndef __PKVM_HYP__
@@ -1465,11 +1467,9 @@ int domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
 	intel_context_flush_no_pasid(info, context, did);
 	context_clear_entry(context);
 #ifdef __PKVM_HYP__
-	if (domain) {
-		cache_tag_unassign_domain(domain, did, device,
+	if (*domain)
+		cache_tag_unassign_domain(*domain, did, device,
 					  IOMMU_NO_PASID);
-		pkvm_put_iommu_domain(domain);
-	}
 	pkvm_remove_iommu_device(device);
 	spin_unlock(&iommu->lock);
 #endif
@@ -1525,24 +1525,45 @@ static int domain_setup_first_level(struct intel_iommu *iommu,
 {
 	struct pt_iommu_x86_64_hw_info pt_info;
 	unsigned int flags = 0;
+	phys_addr_t root;
+	u8 levels;
 
+#ifdef CONFIG_PKVM_INTEL
+	if (pkvm_enabled()) {
+		root = virt_to_phys(domain->pkvm_root);
+		levels = agaw_to_level(domain->pkvm_agaw);
+		goto root_ready;
+	}
+#endif
 	pt_iommu_x86_64_hw_info(&domain->fspt, &pt_info);
-	if (WARN_ON(pt_info.levels != 4 && pt_info.levels != 5))
+	root = pt_info.gcr3_pt;
+	levels = pt_info.levels;
+#ifdef CONFIG_PKVM_INTEL
+root_ready:
+#endif
+
+	if (WARN_ON(levels != 4 && levels != 5))
 		return -EINVAL;
 
-	if (pt_info.levels == 5)
+	if (levels == 5)
 		flags |= PASID_FLAG_FL5LP;
 
 	if (domain->force_snooping)
 		flags |= PASID_FLAG_PAGE_SNOOP;
 
+#ifdef CONFIG_PKVM_INTEL
+	if (pkvm_enabled() ? iommu_paging_structure_coherency(iommu) :
+	    !(domain->fspt.x86_64_pt.common.features &
+	      BIT(PT_FEAT_DMA_INCOHERENT)))
+#else
 	if (!(domain->fspt.x86_64_pt.common.features &
 	      BIT(PT_FEAT_DMA_INCOHERENT)))
+#endif
 		flags |= PASID_FLAG_PWSNP;
 
 	return __domain_setup_first_level(iommu, dev, pasid,
 					  domain_id_iommu(domain, iommu),
-					  pt_info.gcr3_pt, flags, old);
+					  root, flags, old);
 }
 
 static int dmar_domain_attach_device(struct dmar_domain *domain,
@@ -3111,6 +3132,40 @@ static struct dmar_domain *paging_domain_alloc(void)
 	return domain;
 }
 
+#ifdef CONFIG_PKVM_INTEL
+static int pkvm_paging_domain_init(struct dmar_domain *domain,
+				   struct intel_iommu *iommu,
+				   unsigned int vasz_lg2,
+				   unsigned int top_level,
+				   bool first_stage)
+{
+	unsigned long aperture_bits = first_stage ? vasz_lg2 - 1 : vasz_lg2;
+	int ret;
+
+	domain->domain.type = IOMMU_DOMAIN_UNMANAGED;
+	domain->domain.pgsize_bitmap = SZ_4K | SZ_2M | SZ_1G;
+	domain->domain.geometry.aperture_start = 0;
+	domain->domain.geometry.aperture_end = BIT_ULL(aperture_bits) - 1;
+	domain->domain.geometry.force_aperture = true;
+	domain->pkvm_vasz_lg2 = vasz_lg2;
+	domain->pkvm_agaw = top_level - 1;
+
+	domain->pkvm_root =
+		iommu_alloc_pages_node_sz(domain->iommu.nid, GFP_KERNEL, PAGE_SIZE);
+	if (!domain->pkvm_root)
+		return -ENOMEM;
+
+	ret = pkvm_alloc_domain(iommu, domain->pkvm_root, domain->pkvm_agaw,
+				first_stage);
+	if (ret) {
+		iommu_free_pages(domain->pkvm_root);
+		domain->pkvm_root = NULL;
+	}
+
+	return ret;
+}
+#endif
+
 static unsigned int compute_vasz_lg2_fs(struct intel_iommu *iommu,
 					unsigned int *top_level)
 {
@@ -3171,12 +3226,28 @@ intel_iommu_domain_alloc_first_stage(struct device *dev,
 	if (rwbf_required(iommu))
 		dmar_domain->iotlb_sync_map = true;
 
+#ifdef CONFIG_PKVM_INTEL
+	if (pkvm_enabled()) {
+		ret = pkvm_paging_domain_init(dmar_domain, iommu,
+					      cfg.common.hw_max_vasz_lg2,
+					      cfg.top_level, true);
+		if (ret) {
+			kfree(dmar_domain);
+			return ERR_PTR(ret);
+		}
+		goto adjust_pgsize;
+	}
+#endif
+
 	ret = pt_iommu_x86_64_init(&dmar_domain->fspt, &cfg, GFP_KERNEL);
 	if (ret) {
 		kfree(dmar_domain);
 		return ERR_PTR(ret);
 	}
 
+#ifdef CONFIG_PKVM_INTEL
+adjust_pgsize:
+#endif
 	if (!cap_fl1gp_support(iommu->cap))
 		dmar_domain->domain.pgsize_bitmap &= ~(u64)SZ_1G;
 	if (!intel_iommu_superpage)
@@ -3265,12 +3336,28 @@ intel_iommu_domain_alloc_second_stage(struct device *dev,
 	if (flags & IOMMU_HWPT_ALLOC_DIRTY_TRACKING)
 		dmar_domain->domain.dirty_ops = &intel_second_stage_dirty_ops;
 
+#ifdef CONFIG_PKVM_INTEL
+	if (pkvm_enabled()) {
+		ret = pkvm_paging_domain_init(dmar_domain, iommu,
+					      cfg.common.hw_max_vasz_lg2,
+					      cfg.top_level, false);
+		if (ret) {
+			kfree(dmar_domain);
+			return ERR_PTR(ret);
+		}
+		goto adjust_pgsize;
+	}
+#endif
+
 	ret = pt_iommu_vtdss_init(&dmar_domain->sspt, &cfg, GFP_KERNEL);
 	if (ret) {
 		kfree(dmar_domain);
 		return ERR_PTR(ret);
 	}
 
+#ifdef CONFIG_PKVM_INTEL
+adjust_pgsize:
+#endif
 	/* Adjust the supported page sizes to HW capability */
 	sslps = cap_super_page_val(iommu->cap);
 	if (!(sslps & BIT(0)))
@@ -3320,8 +3407,21 @@ static void intel_iommu_domain_free(struct iommu_domain *domain)
 	if (WARN_ON(!list_empty(&dmar_domain->devices)))
 		return;
 
+#ifdef CONFIG_PKVM_INTEL
+	if (pkvm_enabled()) {
+		int ret = pkvm_free_domain(dmar_domain->pkvm_root);
+
+		if (ret)
+			pr_err("Failed to free protected domain root %p: %d\n",
+			       dmar_domain->pkvm_root, ret);
+		goto free_domain;
+	}
+#endif
 	pt_iommu_deinit(&dmar_domain->iommu);
 
+#ifdef CONFIG_PKVM_INTEL
+free_domain:
+#endif
 	kfree(dmar_domain->qi_batch);
 	kfree(dmar_domain);
 }
@@ -3337,6 +3437,14 @@ static int paging_domain_compatible_first_stage(struct dmar_domain *dmar_domain,
 	if (!sm_supported(iommu) || !ecap_flts(iommu->ecap))
 		return -EINVAL;
 
+#ifdef CONFIG_PKVM_INTEL
+	if (pkvm_enabled()) {
+		if (!cap_fl5lp_support(iommu->cap) &&
+		    dmar_domain->pkvm_vasz_lg2 > 48)
+			return -EINVAL;
+		goto check_pgsize;
+	}
+#endif
 	if (!ecap_smpwc(iommu->ecap) &&
 	    !(dmar_domain->fspt.x86_64_pt.common.features &
 	      BIT(PT_FEAT_DMA_INCOHERENT)))
@@ -3347,6 +3455,9 @@ static int paging_domain_compatible_first_stage(struct dmar_domain *dmar_domain,
 	    dmar_domain->fspt.x86_64_pt.common.max_vasz_lg2 > 48)
 		return -EINVAL;
 
+#ifdef CONFIG_PKVM_INTEL
+check_pgsize:
+#endif
 	/* Same page size support */
 	if (!cap_fl1gp_support(iommu->cap) &&
 	    (dmar_domain->domain.pgsize_bitmap & SZ_1G))
@@ -3363,11 +3474,24 @@ static int
 paging_domain_compatible_second_stage(struct dmar_domain *dmar_domain,
 				      struct intel_iommu *iommu)
 {
-	unsigned int vasz_lg2 = dmar_domain->sspt.vtdss_pt.common.max_vasz_lg2;
+	unsigned int vasz_lg2;
 	unsigned int sslps = cap_super_page_val(iommu->cap);
 	struct pt_iommu_vtdss_hw_info pt_info;
+	u8 agaw;
 
+#ifdef CONFIG_PKVM_INTEL
+	if (pkvm_enabled()) {
+		vasz_lg2 = dmar_domain->pkvm_vasz_lg2;
+		agaw = dmar_domain->pkvm_agaw;
+		goto domain_info_ready;
+	}
+#endif
+	vasz_lg2 = dmar_domain->sspt.vtdss_pt.common.max_vasz_lg2;
 	pt_iommu_vtdss_hw_info(&dmar_domain->sspt, &pt_info);
+	agaw = pt_info.aw;
+#ifdef CONFIG_PKVM_INTEL
+domain_info_ready:
+#endif
 
 	if (dmar_domain->domain.dirty_ops && !ssads_supported(iommu))
 		return -EINVAL;
@@ -3378,7 +3502,7 @@ paging_domain_compatible_second_stage(struct dmar_domain *dmar_domain,
 	if (sm_supported(iommu) && !ecap_slts(iommu->ecap))
 		return -EINVAL;
 
-	if (!iommu_paging_structure_coherency(iommu) &&
+	if (!pkvm_enabled() && !iommu_paging_structure_coherency(iommu) &&
 	    !(dmar_domain->sspt.vtdss_pt.common.features &
 	      BIT(PT_FEAT_DMA_INCOHERENT)))
 		return -EINVAL;
@@ -3388,7 +3512,7 @@ paging_domain_compatible_second_stage(struct dmar_domain *dmar_domain,
 		return -EINVAL;
 
 	/* Page table level is supported. */
-	if (!(cap_sagaw(iommu->cap) & BIT(pt_info.aw)))
+	if (!(cap_sagaw(iommu->cap) & BIT(agaw)))
 		return -EINVAL;
 
 	/* Same page size support */
@@ -3406,7 +3530,8 @@ paging_domain_compatible_second_stage(struct dmar_domain *dmar_domain,
 	 * FIXME this is locked wrong, it needs to be under the
 	 * dmar_domain->lock
 	 */
-	if ((dmar_domain->sspt.vtdss_pt.common.features &
+	if (!pkvm_enabled() &&
+	    (dmar_domain->sspt.vtdss_pt.common.features &
 	     BIT(PT_FEAT_VTDSS_FORCE_COHERENCE)) &&
 	    !ecap_sc_support(iommu->ecap))
 		return -EINVAL;
@@ -3823,12 +3948,128 @@ static bool risky_device(struct pci_dev *pdev)
 	return false;
 }
 
+#ifdef CONFIG_PKVM_INTEL
+static int intel_iommu_map_pages(struct iommu_domain *domain,
+				 unsigned long iova, phys_addr_t paddr,
+				 size_t pgsize, size_t pgcount,
+				 int prot, gfp_t gfp, size_t *mapped)
+{
+	struct dmar_domain *dmar_domain = to_dmar_domain(domain);
+	size_t size;
+	int ret;
+
+	if (WARN_ON_ONCE(!pkvm_enabled()) ||
+	    check_mul_overflow(pgsize, pgcount, &size))
+		return -EINVAL;
+
+	ret = pkvm_domain_map(dmar_domain->pkvm_root,
+			      dmar_domain->iommu.nid, iova, paddr,
+			      size, prot, gfp);
+	if (!ret && mapped)
+		*mapped = size;
+
+	return ret;
+}
+
+static size_t intel_iommu_unmap_pages(struct iommu_domain *domain,
+				      unsigned long iova,
+				      size_t pgsize, size_t pgcount,
+				      struct iommu_iotlb_gather *gather)
+{
+	struct dmar_domain *dmar_domain = to_dmar_domain(domain);
+	size_t size;
+
+	if (WARN_ON_ONCE(!pkvm_enabled()) ||
+	    check_mul_overflow(pgsize, pgcount, &size))
+		return 0;
+
+	if (pkvm_domain_unmap(dmar_domain->pkvm_root, iova, size))
+		return 0;
+
+	return size;
+}
+
+#define PKVM_IOMMU_PTE_ADDR_MASK	GENMASK_ULL(51, VTD_PAGE_SHIFT)
+
+static phys_addr_t pkvm_iommu_iova_to_phys(struct dmar_domain *domain,
+					   dma_addr_t iova)
+{
+	bool first_stage = intel_domain_is_fs_paging(domain);
+	struct dma_pte *path[5], *table;
+	u64 entries[ARRAY_SIZE(path)];
+	unsigned int nr_entries;
+	phys_addr_t phys;
+	int level;
+
+	if (iova > domain->domain.geometry.aperture_end)
+		return 0;
+
+	/*
+	 * pKVM is the only writer, but keeps all page-table pages read-only
+	 * shared with the host. Pages removed from the walk are retained until
+	 * domain teardown, so a lockless host walk cannot access freed memory.
+	 */
+
+retry:
+	table = domain->pkvm_root;
+	level = agaw_to_level(domain->pkvm_agaw);
+	nr_entries = 0;
+	if (WARN_ON_ONCE(level > ARRAY_SIZE(path)))
+		return 0;
+
+	while (level) {
+		unsigned int shift = VTD_PAGE_SHIFT +
+					 level_to_offset_bits(level);
+		unsigned int index = (iova >> shift) & LEVEL_MASK;
+		u64 pte;
+
+		path[nr_entries] = &table[index];
+		pte = READ_ONCE(path[nr_entries]->val);
+		entries[nr_entries++] = pte;
+		if (first_stage ? !(pte & DMA_FL_PTE_PRESENT) :
+				  !(pte & (DMA_PTE_READ | DMA_PTE_WRITE)))
+			return 0;
+
+		if (level == 1 || (pte & DMA_PTE_LARGE_PAGE)) {
+			phys = (pte & PKVM_IOMMU_PTE_ADDR_MASK) |
+			       (iova & (BIT_ULL(shift) - 1));
+			break;
+		}
+
+		table = phys_to_virt(pte & PKVM_IOMMU_PTE_ADDR_MASK);
+		level--;
+	}
+
+	/* Detect an intermediate page being detached and reused during the walk. */
+	smp_rmb();
+	while (nr_entries--) {
+		if (READ_ONCE(path[nr_entries]->val) != entries[nr_entries])
+			goto retry;
+	}
+
+	return phys;
+}
+
+static phys_addr_t intel_iommu_iova_to_phys(struct iommu_domain *domain,
+					    dma_addr_t iova)
+{
+	struct dmar_domain *dmar_domain = to_dmar_domain(domain);
+
+	if (pkvm_enabled())
+		return pkvm_iommu_iova_to_phys(dmar_domain, iova);
+	if (intel_domain_is_fs_paging(dmar_domain))
+		return pt_iommu_x86_64_iova_to_phys(domain, iova);
+
+	return pt_iommu_vtdss_iova_to_phys(domain, iova);
+}
+#endif
+
 static int intel_iommu_iotlb_sync_map(struct iommu_domain *domain,
 				      unsigned long iova, size_t size)
 {
 	struct dmar_domain *dmar_domain = to_dmar_domain(domain);
 
-	if (dmar_domain->iotlb_sync_map)
+	if (!pkvm_enabled() && dmar_domain->iotlb_sync_map)
 		cache_tag_flush_range_np(dmar_domain, iova, iova + size - 1);
 
 	return 0;
@@ -4095,7 +4336,7 @@ static int context_setup_pass_through(struct device *dev, u8 bus, u8 devfn)
 
 	if (pkvm_enabled()) {
 		ret = pkvm_context_mapping(iommu, info, bus, devfn, 0,
-					   0, FLPT_DEFAULT_DID);
+					   FLPT_DEFAULT_DID);
 		if (ret) {
 			pr_err("%s: iommu%d: protected context setup failed: %d\n",
 			       __func__, iommu->seq_id, ret);
@@ -4220,7 +4461,13 @@ static struct iommu_domain identity_domain = {
 };
 
 const struct iommu_domain_ops intel_fs_paging_domain_ops = {
+#ifdef CONFIG_PKVM_INTEL
+	.map_pages = intel_iommu_map_pages,
+	.unmap_pages = intel_iommu_unmap_pages,
+	.iova_to_phys = intel_iommu_iova_to_phys,
+#else
 	IOMMU_PT_DOMAIN_OPS(x86_64),
+#endif
 	.attach_dev = intel_iommu_attach_device,
 	.set_dev_pasid = intel_iommu_set_dev_pasid,
 	.iotlb_sync_map = intel_iommu_iotlb_sync_map,
@@ -4231,7 +4478,13 @@ const struct iommu_domain_ops intel_fs_paging_domain_ops = {
 };
 
 const struct iommu_domain_ops intel_ss_paging_domain_ops = {
+#ifdef CONFIG_PKVM_INTEL
+	.map_pages = intel_iommu_map_pages,
+	.unmap_pages = intel_iommu_unmap_pages,
+	.iova_to_phys = intel_iommu_iova_to_phys,
+#else
 	IOMMU_PT_DOMAIN_OPS(vtdss),
+#endif
 	.attach_dev = intel_iommu_attach_device,
 	.set_dev_pasid = intel_iommu_set_dev_pasid,
 	.iotlb_sync_map = intel_iommu_iotlb_sync_map,
