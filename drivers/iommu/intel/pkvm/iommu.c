@@ -264,6 +264,7 @@ static int set_root_table(struct intel_iommu *iommu)
 static int handle_gcmd_srtp(struct intel_iommu *iommu)
 {
 	u32 gsts = readl(iommu->reg + DMAR_GSTS_REG);
+	phys_addr_t root_pa;
 	int ret;
 
 	BUG_ON(gsts != iommu->vgsts);
@@ -286,12 +287,20 @@ static int handle_gcmd_srtp(struct intel_iommu *iommu)
 		return -EINVAL;
 	}
 
-	/* Root-table ownership is established by a later patch. */
+	root_pa = pkvm_host_gpa_to_phys(iommu->vrta & VTD_PAGE_MASK);
+	ret = pkvm_host_donate_hyp_share_ro(root_pa, VTD_PAGE_SIZE, true);
+	if (ret) {
+		pkvm_err("iommu%d: failed to protect root table: %d\n",
+			 iommu->seq_id, ret);
+		return ret;
+	}
+
+	iommu->root_entry = __pkvm_va(root_pa);
+	__iommu_flush_cache(iommu, iommu->root_entry, VTD_PAGE_SIZE);
+
 	ret = set_root_table(iommu);
 	if (ret)
 		return ret;
-
-	iommu->root_entry = pkvm_host_gpa_to_virt(iommu->vrta & VTD_PAGE_MASK);
 
 	pkvm_dbg("iommu%d: root table set to %#llx\n",
 		 iommu->seq_id, iommu->vrta);
