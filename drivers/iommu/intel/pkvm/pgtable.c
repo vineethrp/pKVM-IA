@@ -366,6 +366,8 @@ int pkvm_iommu_pgtable_map(struct dmar_domain *domain, unsigned long iova,
 						  INVALID_PAGE, size);
 		WARN_ON_ONCE(rollback_ret);
 	}
+	if (!ret && READ_ONCE(domain->iotlb_sync_map))
+		cache_tag_flush_range_np(domain, iova, iova_end - 1);
 	current_iommu_domain = NULL;
 	if (ret && !rollback_ret)
 		pkvm_host_unuse_dma(phys, size);

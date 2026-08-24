@@ -157,6 +157,10 @@ pkvm_get_iommu_domain(phys_addr_t root, u16 did,
 		domain = NULL;
 	}
 
+	/* Caching mode may retain non-present second-stage translations. */
+	if (domain && !domain->use_first_level && cap_caching_mode(iommu->cap))
+		WRITE_ONCE(domain->iotlb_sync_map, true);
+
 	return domain;
 }
 
