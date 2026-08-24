@@ -297,6 +297,20 @@ int intel_pasid_tear_down_entry(struct intel_iommu *iommu,
 	u16 did, pgtt;
 
 #ifndef __PKVM_HYP__
+	if (pkvm_enabled()) {
+		struct device_domain_info *info = dev_iommu_priv_get(dev);
+		int ret;
+
+		if (WARN_ON(!info || !info->pasid_table))
+			return -ENODEV;
+
+		ret = pkvm_pasid_teardown(info, pasid);
+		if (ret)
+			pr_err("iommu%d: protected PASID teardown failed: %d\n",
+			       iommu->seq_id, ret);
+		return ret;
+	}
+
 	spin_lock(&iommu->lock);
 #endif
 	pte = intel_pasid_get_entry(dev, pasid);
@@ -487,6 +501,22 @@ int intel_pasid_setup_first_level(struct intel_iommu *iommu,
 		return -EINVAL;
 	}
 
+#ifndef __PKVM_HYP__
+	if (pkvm_enabled()) {
+		struct device_domain_info *info = dev_iommu_priv_get(dev);
+		int ret;
+
+		if (!info || !info->pasid_table)
+			return -ENODEV;
+
+		ret = pkvm_pasid_setup_fl(info, fsptptr, pasid, did, flags);
+		if (ret)
+			pr_err("%s: iommu%d: protected first-level PASID setup failed: %d\n",
+			       __func__, iommu->seq_id, ret);
+		return ret;
+	}
+#endif
+
 	spin_lock(&iommu->lock);
 #ifdef __PKVM_HYP__
 	dev = pkvm_get_iommu_device(iommu, info->segment,
@@ -595,6 +625,24 @@ int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 
 #ifndef __PKVM_HYP__
 	did = domain_id_iommu(domain, iommu);
+#ifdef CONFIG_PKVM_INTEL
+	if (pkvm_enabled()) {
+		struct device_domain_info *info = dev_iommu_priv_get(dev);
+		struct pt_iommu_vtdss_hw_info pt_info;
+		int ret;
+
+		if (!info || !info->pasid_table)
+			return -ENODEV;
+
+		pt_iommu_vtdss_hw_info(&domain->sspt, &pt_info);
+		ret = pkvm_pasid_setup_sl(info, pt_info.ssptptr, pt_info.aw,
+					  pasid, did);
+		if (ret)
+			pr_err("%s: iommu%d: protected second-level PASID setup failed: %d\n",
+			       __func__, iommu->seq_id, ret);
+		return ret;
+	}
+#endif
 #endif
 
 	spin_lock(&iommu->lock);
@@ -724,6 +772,20 @@ int intel_pasid_setup_pass_through(struct intel_iommu *iommu,
 {
 	u16 did = FLPT_DEFAULT_DID;
 	struct pasid_entry *pte;
+
+	if (pkvm_enabled()) {
+		struct device_domain_info *info = dev_iommu_priv_get(dev);
+		int ret;
+
+		if (!info || !info->pasid_table)
+			return -ENODEV;
+
+		ret = pkvm_pasid_setup_sl(info, 0, 0, pasid, did);
+		if (ret)
+			pr_err("%s: iommu%d: protected passthrough PASID setup failed: %d\n",
+			       __func__, iommu->seq_id, ret);
+		return ret;
+	}
 
 	spin_lock(&iommu->lock);
 	pte = intel_pasid_get_entry(dev, pasid);
@@ -890,6 +952,15 @@ static void device_pasid_table_teardown(struct device *dev, u8 bus, u8 devfn)
 	struct context_entry *context;
 	u16 did;
 
+	if (pkvm_enabled()) {
+		int ret = pkvm_context_clear(iommu, bus, devfn);
+
+		if (ret)
+			pr_err("%s: iommu%d: protected context teardown failed: %d\n",
+			       __func__, iommu->seq_id, ret);
+		return;
+	}
+
 	spin_lock(&iommu->lock);
 	context = iommu_context_addr(iommu, bus, devfn, false);
 	if (!context) {
@@ -990,6 +1061,17 @@ int device_pasid_table_setup(struct device_domain_info *info,
 #endif
 	struct intel_iommu *iommu = info->iommu;
 	struct context_entry *context;
+
+#ifndef __PKVM_HYP__
+	if (pkvm_enabled()) {
+		int ret = pkvm_pasid_table_setup(iommu, info, bus, devfn);
+
+		if (ret)
+			pr_err("iommu%d: protected PASID table setup failed: %d\n",
+			       iommu->seq_id, ret);
+		return ret;
+	}
+#endif
 
 	spin_lock(&iommu->lock);
 	context = iommu_context_addr(iommu, bus, devfn, true);

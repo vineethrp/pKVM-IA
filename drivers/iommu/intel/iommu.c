@@ -1233,6 +1233,15 @@ static int domain_context_mapping_one(struct dmar_domain *domain,
 
 	pr_debug("Set context mapping for %02x:%02x.%d\n",
 		bus, PCI_SLOT(devfn), PCI_FUNC(devfn));
+
+	if (pkvm_enabled()) {
+		ret = pkvm_context_mapping(iommu, info, bus, devfn, root, agaw,
+					   did);
+		if (ret)
+			pr_err("%s: iommu%d: protected context setup failed: %d\n",
+			       __func__, iommu->seq_id, ret);
+		return ret;
+	}
 #else
 	root = domain->root_pa;
 	agaw = domain->agaw;
@@ -1396,6 +1405,16 @@ int domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
 #endif
 	int ret = 0;
 	u16 did;
+
+#ifndef __PKVM_HYP__
+	if (pkvm_enabled()) {
+		ret = pkvm_context_clear(iommu, bus, devfn);
+		if (ret)
+			pr_err("%s: iommu%d: protected context teardown failed: %d\n",
+			       __func__, iommu->seq_id, ret);
+		return ret;
+	}
+#endif
 
 	spin_lock(&iommu->lock);
 	context = iommu_context_addr(iommu, bus, devfn, 0);
@@ -4051,6 +4070,21 @@ static int context_setup_pass_through(struct device *dev, u8 bus, u8 devfn)
 	struct device_domain_info *info = dev_iommu_priv_get(dev);
 	struct intel_iommu *iommu = info->iommu;
 	struct context_entry *context;
+	int ret;
+
+	if (pkvm_enabled()) {
+		ret = pkvm_context_mapping(iommu, info, bus, devfn, 0,
+					   0, FLPT_DEFAULT_DID);
+		if (ret) {
+			pr_err("%s: iommu%d: protected context setup failed: %d\n",
+			       __func__, iommu->seq_id, ret);
+		} else if (!dev_is_real_dma_subdevice(dev)) {
+			/* pKVM implements passthrough with second-stage translation. */
+			iommu_enable_pci_ats(info);
+		}
+
+		return ret;
+	}
 
 	spin_lock(&iommu->lock);
 	context = iommu_context_addr(iommu, bus, devfn, 1);

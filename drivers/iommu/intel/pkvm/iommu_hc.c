@@ -78,6 +78,8 @@ static int iommu_set_lm_ce(struct set_lm_ce_data *data)
 	struct intel_iommu *iommu = iommu_from_phys(data->phys);
 	struct device_domain_info info = {};
 	struct dmar_domain domain = {};
+	phys_addr_t root;
+	int level;
 	int ret;
 
 	if (!iommu || !iommu->root_entry || sm_supported(iommu))
@@ -95,8 +97,24 @@ static int iommu_set_lm_ce(struct set_lm_ce_data *data)
 	if (ret)
 		return ret;
 
-	domain.root_pa = pkvm_host_gpa_to_phys(data->root_gpa);
-	domain.agaw = data->agaw;
+	if (data->did == FLPT_DEFAULT_DID) {
+		if (data->root_gpa)
+			return -EINVAL;
+		root = pkvm_host_ept_root();
+		level = pkvm_host_ept_level();
+		if (root == INVALID_PAGE || level < 2 || level > 5)
+			return -EINVAL;
+		domain.agaw = level - 2;
+	} else {
+		root = pkvm_host_gpa_to_phys(data->root_gpa);
+		if (!root || !PAGE_ALIGNED(root) || data->agaw > 3)
+			return -EINVAL;
+		domain.agaw = data->agaw;
+	}
+
+	if (!(cap_sagaw(iommu->cap) & BIT(domain.agaw)))
+		return -EINVAL;
+	domain.root_pa = root;
 	domain.use_first_level = false;
 
 	ret = domain_context_mapping_one(&domain, &info, data->did);
