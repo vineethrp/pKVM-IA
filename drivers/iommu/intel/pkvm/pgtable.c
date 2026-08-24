@@ -28,6 +28,8 @@ static void *iommu_pgtable_zalloc_page(struct pkvm_memcache *mc)
 		return NULL;
 
 	memset(page, 0, VTD_PAGE_SIZE);
+	if (current_iommu_domain->needs_cpu_flush)
+		clflush_cache_range(page, VTD_PAGE_SIZE);
 	page_meta = pkvm_virt_to_page(page);
 	pkvm_set_page_refcounted(page_meta);
 
@@ -167,6 +169,8 @@ static int iommu_pte_count(int level)
 static void iommu_pte_set(void *ptep, u64 val)
 {
 	WRITE_ONCE(*(u64 *)ptep, val);
+	if (current_iommu_domain->needs_cpu_flush)
+		clflush_cache_range(ptep, sizeof(u64));
 }
 
 static u64 iommu_pte_get(void *ptep)
@@ -231,6 +235,10 @@ void pkvm_iommu_pgtable_init(struct dmar_domain *domain,
 		.allowed_pgsz = allowed_pgsz,
 		.flush_tlb_lazy = true,
 	};
+
+	if (domain->needs_cpu_flush)
+		clflush_cache_range(pkvm_phys_to_virt(domain->root_pa),
+				    VTD_PAGE_SIZE);
 
 	if (domain->use_first_level) {
 		cap.table_prot = DMA_FL_PTE_PRESENT | DMA_PTE_WRITE |

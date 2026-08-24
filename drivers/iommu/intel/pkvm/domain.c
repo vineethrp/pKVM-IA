@@ -64,6 +64,12 @@ static int domain_iova_bits(struct intel_iommu *iommu,
 	return 0;
 }
 
+static bool iommu_paging_structure_coherency(struct intel_iommu *iommu)
+{
+	return sm_supported(iommu) ?
+			ecap_smpwc(iommu->ecap) : ecap_coherent(iommu->ecap);
+}
+
 static bool domain_compatible(struct dmar_domain *domain,
 			      struct intel_iommu *iommu)
 {
@@ -80,6 +86,9 @@ static bool domain_compatible(struct dmar_domain *domain,
 		return false;
 	if (domain->pgt.cap.allowed_pgsz &
 	    ~domain_pgsize_mask(iommu, domain->use_first_level))
+		return false;
+	if (!iommu_paging_structure_coherency(iommu) &&
+	    !domain->needs_cpu_flush)
 		return false;
 
 	return true;
@@ -194,6 +203,7 @@ pkvm_alloc_iommu_domain(struct intel_iommu *iommu, phys_addr_t root, u8 agaw,
 	domain->agaw = agaw;
 	domain->iova_bits = iova_bits;
 	domain->use_first_level = use_first_level;
+	domain->needs_cpu_flush = !iommu_paging_structure_coherency(iommu);
 	pkvm_iommu_pgtable_init(domain,
 				domain_pgsize_mask(iommu, use_first_level));
 	domain->index = index;
