@@ -97,6 +97,27 @@ int pkvm_iommu_domain_map(struct iommu_domain_map_data *in,
 	return ret;
 }
 
+int pkvm_iommu_domain_unmap(u64 root_gpa, unsigned long iova, size_t size)
+{
+	phys_addr_t root = pkvm_host_gpa_to_phys(root_gpa);
+	struct dmar_domain *domain;
+	int ret;
+
+	if (!root || !PAGE_ALIGNED(root))
+		return -EINVAL;
+
+	domain = pkvm_get_iommu_domain_by_root(root);
+	if (!domain)
+		return -EINVAL;
+
+	pkvm_spin_lock(&domain->lock);
+	ret = pkvm_iommu_pgtable_unmap(domain, iova, size);
+	pkvm_spin_unlock(&domain->lock);
+	pkvm_put_iommu_domain(domain);
+
+	return ret;
+}
+
 int pkvm_iommu_clear_ce(struct clear_ce_data *data)
 {
 	struct intel_iommu *iommu = iommu_from_phys(data->phys);
