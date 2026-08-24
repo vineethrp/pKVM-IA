@@ -13,6 +13,13 @@
 #define IOMMU_PTE_ADDR_MASK	GENMASK_ULL(51, VTD_PAGE_SHIFT)
 #define IOMMU_PTE_ENTRIES	(VTD_PAGE_SIZE / sizeof(u64))
 
+/*
+ * Bit 63 is ignored by hardware in both first- and second-level
+ * translations. Keep it set on protected leaf PTEs so a later unmap can
+ * retain the mapping metadata after clearing the hardware-present bits.
+ */
+#define IOMMU_PTE_MAPPED	BIT_ULL(63)
+
 static DEFINE_PER_CPU(struct dmar_domain *, __current_iommu_domain);
 #define current_iommu_domain (*this_cpu_ptr(&__current_iommu_domain))
 
@@ -77,7 +84,7 @@ static bool iommu_sl_pte_present(void *ptep)
 
 static bool iommu_pte_annotated(void *ptep)
 {
-	return false;
+	return !!(READ_ONCE(*(u64 *)ptep) & IOMMU_PTE_MAPPED);
 }
 
 static bool iommu_pte_huge(void *ptep)
@@ -346,9 +353,10 @@ int pkvm_iommu_pgtable_map(struct dmar_domain *domain, unsigned long iova,
 	if (WARN_ON_ONCE(current_iommu_domain))
 		return -EBUSY;
 
-	pte_prot = domain->pgt.pgt_ops->calc_pte_perm(prot & IOMMU_READ,
-						       prot & IOMMU_WRITE,
-						       false);
+	pte_prot = IOMMU_PTE_MAPPED;
+	pte_prot |= domain->pgt.pgt_ops->calc_pte_perm(prot & IOMMU_READ,
+							prot & IOMMU_WRITE,
+							false);
 	ret = pkvm_host_use_dma(phys, size);
 	if (ret)
 		return ret;
