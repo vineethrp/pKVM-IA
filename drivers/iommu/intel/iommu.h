@@ -616,6 +616,7 @@ struct dmar_domain {
 	u8 iova_bits;
 	u8 use_first_level:1;
 	u8 needs_cpu_flush:1;
+	bool iotlb_sync_map;
 	atomic_t refcount;
 	unsigned int index;
 	struct hlist_node hnode;
