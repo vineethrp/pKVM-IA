@@ -80,6 +80,7 @@ int pkvm_free_domain(void *root);
 int pkvm_domain_map(void *root, int nid, unsigned long iova,
 		    phys_addr_t phys, size_t size, unsigned int prot,
 		    gfp_t gfp);
+int pkvm_domain_unmap(void *root, unsigned long iova, size_t size);
 int pkvm_context_mapping(struct intel_iommu *iommu,
 			 struct device_domain_info *info, u8 bus, u8 devfn,
 			 u64 root_gpa, u8 agaw, u16 did);
@@ -134,6 +135,8 @@ int pkvm_iommu_pgtable_destroy(struct dmar_domain *domain);
 int pkvm_iommu_pgtable_map(struct dmar_domain *domain, unsigned long iova,
 			   phys_addr_t phys, size_t size, u64 prot,
 			   struct pkvm_memcache *host_mc);
+int pkvm_iommu_pgtable_unmap(struct dmar_domain *domain, unsigned long iova,
+			     size_t size);
 struct dmar_domain *
 pkvm_alloc_iommu_domain(struct intel_iommu *iommu, phys_addr_t root, u8 agaw,
 			bool use_first_level);
@@ -163,6 +166,7 @@ int pkvm_iommu_alloc_domain(u64 iommu_phys, u64 root_gpa, u8 agaw,
 int pkvm_iommu_free_domain(u64 root_gpa, struct pkvm_memcache *mc);
 int pkvm_iommu_domain_map(struct iommu_domain_map_data *in,
 			  struct iommu_domain_map_data *out);
+int pkvm_iommu_domain_unmap(u64 root_gpa, unsigned long iova, size_t size);
 int pkvm_iommu_clear_ce(struct clear_ce_data *data);
 int pkvm_iommu_set_lm_ce(struct set_lm_ce_data *in,
 			 struct set_lm_ce_data *out);
@@ -196,6 +200,12 @@ static inline int pkvm_free_domain(void *root)
 static inline int pkvm_domain_map(void *root, int nid, unsigned long iova,
 				  phys_addr_t phys, size_t size,
 				  unsigned int prot, gfp_t gfp)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int pkvm_domain_unmap(void *root, unsigned long iova,
+				    size_t size)
 {
 	return -EOPNOTSUPP;
 }

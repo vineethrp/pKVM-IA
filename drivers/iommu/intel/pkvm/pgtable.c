@@ -374,3 +374,70 @@ int pkvm_iommu_pgtable_map(struct dmar_domain *domain, unsigned long iova,
 
 	return ret;
 }
+
+static int validate_unmap_range(struct dmar_domain *domain,
+				unsigned long iova, size_t size)
+{
+	const struct pkvm_pgtable_ops *pgt_ops = domain->pgt.pgt_ops;
+	unsigned long end = iova + size;
+	unsigned long phys;
+	unsigned long leaf_size;
+	int level;
+
+	while (iova < end) {
+		pkvm_pgtable_lookup(&domain->pgt, iova, &phys, NULL, &level);
+		if (!VALID_PAGE(phys))
+			return -ENOENT;
+
+		leaf_size = pgt_ops->level_to_size(level);
+		if (!IS_ALIGNED(iova, leaf_size) || leaf_size > end - iova)
+			return -E2BIG;
+
+		iova += leaf_size;
+	}
+
+	return 0;
+}
+
+int pkvm_iommu_pgtable_unmap(struct dmar_domain *domain, unsigned long iova,
+			     size_t size)
+{
+	unsigned long mapped_iova, mapped_size, phys;
+	unsigned long iova_end;
+	int ret;
+
+	if (!size || !PAGE_ALIGNED(iova) || !PAGE_ALIGNED(size) ||
+	    check_add_overflow(iova, size, &iova_end) ||
+	    iova_end > BIT_ULL(domain->iova_bits))
+		return -EINVAL;
+
+	ret = validate_unmap_range(domain, iova, size);
+	if (ret)
+		return ret;
+
+	if (WARN_ON_ONCE(current_iommu_domain))
+		return -EBUSY;
+
+	current_iommu_domain = domain;
+	while (iova < iova_end) {
+		pkvm_pgtable_lookup_range(&domain->pgt, iova, iova_end - iova,
+					  &mapped_iova, &mapped_size,
+					  &phys, NULL);
+		if (WARN_ON(mapped_iova != iova || !mapped_size ||
+			    !VALID_PAGE(phys))) {
+			ret = -EFAULT;
+			break;
+		}
+
+		ret = pkvm_pgtable_unmap(&domain->pgt, iova, phys, mapped_size);
+		if (WARN_ON(ret))
+			break;
+
+		/* The invalidation completes before the DMA pins are released. */
+		pkvm_host_unuse_dma(phys, mapped_size);
+		iova += mapped_size;
+	}
+	current_iommu_domain = NULL;
+
+	return ret;
+}
