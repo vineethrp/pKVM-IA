@@ -269,7 +269,7 @@ int pkvm_domain_unmap(void *root, unsigned long iova, size_t size)
 
 int pkvm_context_mapping(struct intel_iommu *iommu,
 			 struct device_domain_info *info, u8 bus, u8 devfn,
-			 u64 root_gpa, u8 agaw, u16 did)
+			 u64 root_gpa, u16 did)
 {
 	union pkvm_hc_data d = {};
 	struct set_lm_ce_data *data = &d.iommu_set_lm_ce.in;
@@ -282,7 +282,6 @@ int pkvm_context_mapping(struct intel_iommu *iommu,
 	data->bus = bus;
 	data->devfn = devfn;
 	data->ats_qdep = info ? info->ats_qdep : 0;
-	data->agaw = agaw;
 	data->ats_supported = info ? info->ats_supported : 0;
 	data->ats_enabled = info ? info->ats_enabled : 0;
 
@@ -404,7 +403,7 @@ out_unlock:
 }
 
 int pkvm_pasid_setup_sl(struct device_domain_info *info,
-			phys_addr_t root, u8 agaw, u32 pasid, u16 did)
+			phys_addr_t root, u32 pasid, u16 did)
 {
 	union pkvm_hc_data d = {};
 	struct pasid_setup_sl_data *data = &d.iommu_pasid_setup_sl.in;
@@ -418,7 +417,6 @@ int pkvm_pasid_setup_sl(struct device_domain_info *info,
 	data->did = did;
 	data->bus = info->bus;
 	data->devfn = info->devfn;
-	data->agaw = agaw;
 
 	spin_lock(&iommu->lock);
 	ret = pkvm_hypercall_inout(iommu_pasid_setup_sl, &d, &d);

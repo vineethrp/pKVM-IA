@@ -73,7 +73,6 @@ struct set_lm_ce_data {
 	u8 bus;
 	u8 devfn;
 	u8 ats_qdep;
-	u8 agaw;
 	u8 ats_enabled:1;
 	u8 ats_supported:1;
 };
@@ -116,7 +115,6 @@ struct pasid_setup_sl_data {
 	u16 did;
 	u8 bus;
 	u8 devfn;
-	u8 agaw;
 };
 
 struct pasid_teardown_data {

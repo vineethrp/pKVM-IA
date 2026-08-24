@@ -348,8 +348,9 @@ int intel_pasid_tear_down_entry(struct intel_iommu *iommu,
 #else
 /* The caller must hold iommu->lock. */
 int intel_pasid_tear_down_entry(struct intel_iommu *iommu,
-				 struct pkvm_device *dev, u32 pasid,
-				 bool fault_ignore);
+				struct pkvm_device *dev, u32 pasid,
+				bool fault_ignore,
+				struct dmar_domain **domain);
 #endif
 void intel_pasid_setup_page_snoop_control(struct intel_iommu *iommu,
 					  struct device *dev, u32 pasid);

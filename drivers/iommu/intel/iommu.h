@@ -637,6 +637,13 @@ struct dmar_domain {
 		struct pt_iommu_vtdss sspt;
 	};
 
+#ifdef CONFIG_PKVM_INTEL
+	/* Host metadata for page tables owned and updated by pKVM. */
+	void *pkvm_root;
+	unsigned int pkvm_vasz_lg2;
+	u8 pkvm_agaw;
+#endif
+
 	struct xarray iommu_array;	/* Attached IOMMU array */
 
 	u8 force_snooping:1;		/* Create PASID entry with snoop control */
@@ -909,6 +916,7 @@ struct device_domain_info {
 
 struct pkvm_device {
 	struct device_domain_info info;
+	struct dmar_domain *domain;
 	unsigned long index;
 	struct hlist_node hnode;
 };
@@ -1120,7 +1128,8 @@ int domain_context_mapping_one(struct dmar_domain *domain,
 			       struct device_domain_info *info,
 			       u16 did);
 int domain_context_clear_one(struct device_domain_info *info,
-			     u8 bus, u8 devfn);
+			     u8 bus, u8 devfn,
+			     struct dmar_domain **domain);
 #endif
 
 #if defined(CONFIG_INTEL_IOMMU) && !defined(__PKVM_HYP__)

@@ -83,7 +83,7 @@ int pkvm_domain_map(void *root, int nid, unsigned long iova,
 int pkvm_domain_unmap(void *root, unsigned long iova, size_t size);
 int pkvm_context_mapping(struct intel_iommu *iommu,
 			 struct device_domain_info *info, u8 bus, u8 devfn,
-			 u64 root_gpa, u8 agaw, u16 did);
+			 u64 root_gpa, u16 did);
 int pkvm_context_clear(struct intel_iommu *iommu, u8 bus, u8 devfn);
 int pkvm_pasid_table_setup(struct intel_iommu *iommu,
 			   struct device_domain_info *info,
@@ -92,7 +92,7 @@ int pkvm_pasid_setup_fl(struct device_domain_info *info,
 			phys_addr_t fsptptr, u32 pasid, u16 did,
 			int flags);
 int pkvm_pasid_setup_sl(struct device_domain_info *info,
-			phys_addr_t root, u8 agaw, u32 pasid, u16 did);
+			phys_addr_t root, u32 pasid, u16 did);
 int pkvm_pasid_teardown(struct device_domain_info *info, u32 pasid);
 #else
 extern unsigned int iommu_pglvl_mask;
@@ -144,6 +144,9 @@ struct dmar_domain *pkvm_get_iommu_domain_by_root(phys_addr_t root);
 struct dmar_domain *
 pkvm_get_iommu_domain(phys_addr_t root, u16 did,
 		      struct intel_iommu *iommu);
+struct dmar_domain *
+pkvm_find_iommu_domain(phys_addr_t root, u16 did,
+		       struct intel_iommu *iommu);
 void pkvm_put_iommu_domain(struct dmar_domain *domain);
 int pkvm_free_iommu_domain(phys_addr_t root,
 			   struct pkvm_memcache *teardown_mc);
@@ -212,7 +215,7 @@ static inline int pkvm_domain_unmap(void *root, unsigned long iova,
 
 static inline int pkvm_context_mapping(struct intel_iommu *iommu,
 				       struct device_domain_info *info,
-				       u8 bus, u8 devfn, u64 root_gpa, u8 agaw,
+				       u8 bus, u8 devfn, u64 root_gpa,
 				       u16 did)
 {
 	return -EOPNOTSUPP;
@@ -239,7 +242,7 @@ static inline int pkvm_pasid_setup_fl(struct device_domain_info *info,
 }
 
 static inline int pkvm_pasid_setup_sl(struct device_domain_info *info,
-				      phys_addr_t root, u8 agaw, u32 pasid,
+				      phys_addr_t root, u32 pasid,
 				      u16 did)
 {
 	return -EOPNOTSUPP;
