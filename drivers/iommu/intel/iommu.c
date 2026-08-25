@@ -974,7 +974,16 @@ static void iommu_disable_pci_pri(struct device_domain_info *info)
 
 static void intel_flush_iotlb_all(struct iommu_domain *domain)
 {
-	cache_tag_flush_all(to_dmar_domain(domain));
+	struct dmar_domain *dmar_domain = to_dmar_domain(domain);
+
+#ifdef CONFIG_PKVM_INTEL
+	if (pkvm_enabled()) {
+		WARN_ON_ONCE(pkvm_domain_sync(dmar_domain->pkvm_root, 0,
+					      BIT_ULL(dmar_domain->pkvm_vasz_lg2)));
+		return;
+	}
+#endif
+	cache_tag_flush_all(dmar_domain);
 }
 
 static void iommu_disable_protect_mem_regions(struct intel_iommu *iommu)
@@ -3587,12 +3596,36 @@ static int intel_iommu_attach_device(struct iommu_domain *domain,
 	return ret;
 }
 
+#ifdef CONFIG_PKVM_INTEL
+static bool pkvm_iommu_sync_unmap(struct iommu_domain *domain,
+				  struct iommu_iotlb_gather *gather)
+{
+	return domain->type == IOMMU_DOMAIN_DMA &&
+	       !iommu_iotlb_gather_queued(gather);
+}
+#endif
+
 static void intel_iommu_tlb_sync(struct iommu_domain *domain,
 				 struct iommu_iotlb_gather *gather)
 {
-	cache_tag_flush_range(to_dmar_domain(domain), gather->start,
-			      gather->end,
+	struct dmar_domain *dmar_domain = to_dmar_domain(domain);
+
+#ifdef CONFIG_PKVM_INTEL
+	if (pkvm_enabled()) {
+		if (!pkvm_iommu_sync_unmap(domain, gather)) {
+			size_t size = gather->end - gather->start + 1;
+
+			WARN_ON_ONCE(pkvm_domain_sync(dmar_domain->pkvm_root,
+						      gather->start, size));
+		}
+		goto out_free_pages;
+	}
+#endif
+	cache_tag_flush_range(dmar_domain, gather->start, gather->end,
 			      iommu_pages_list_empty(&gather->freelist));
+#ifdef CONFIG_PKVM_INTEL
+out_free_pages:
+#endif
 	iommu_put_pages_list(&gather->freelist);
 }
 
@@ -3981,14 +4014,18 @@ static size_t intel_iommu_unmap_pages(struct iommu_domain *domain,
 				      struct iommu_iotlb_gather *gather)
 {
 	struct dmar_domain *dmar_domain = to_dmar_domain(domain);
+	bool sync;
 	size_t size;
 
 	if (WARN_ON_ONCE(!pkvm_enabled()) ||
 	    check_mul_overflow(pgsize, pgcount, &size))
 		return 0;
 
-	if (pkvm_domain_unmap(dmar_domain->pkvm_root, iova, size))
+	sync = pkvm_iommu_sync_unmap(domain, gather);
+	if (pkvm_domain_unmap(dmar_domain->pkvm_root, iova, size, sync))
 		return 0;
+
+	iommu_iotlb_gather_add_range(gather, iova, size);
 
 	return size;
 }
