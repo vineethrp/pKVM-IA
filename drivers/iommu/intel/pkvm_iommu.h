@@ -48,6 +48,7 @@ struct intel_iommu;
 struct dmar_domain;
 struct device_domain_info;
 struct pkvm_device;
+struct irte;
 
 #ifndef __PKVM_HYP__
 #include <asm/kvm_host.h>
@@ -95,6 +96,8 @@ int pkvm_pasid_setup_fl(struct device_domain_info *info,
 int pkvm_pasid_setup_sl(struct device_domain_info *info,
 			phys_addr_t root, u32 pasid, u16 did);
 int pkvm_pasid_teardown(struct device_domain_info *info, u32 pasid);
+int pkvm_modify_irte(struct intel_iommu *iommu, int index,
+		     const struct irte *modified);
 #else
 extern unsigned int iommu_pglvl_mask;
 extern unsigned int iommu_pgsz_mask;
@@ -185,6 +188,7 @@ int pkvm_iommu_pasid_setup_fl(struct pasid_setup_fl_data *in,
 int pkvm_iommu_pasid_setup_sl(struct pasid_setup_sl_data *in,
 			      struct pasid_setup_sl_data *out);
 int pkvm_iommu_pasid_teardown(struct pasid_teardown_data *data);
+int pkvm_iommu_modify_irte(struct modify_irte_data *data);
 #endif /* !__PKVM_HYP__ */
 #else /* !CONFIG_PKVM_INTEL */
 static inline int pkvm_iec_flush(struct intel_iommu *iommu, bool global,
@@ -260,6 +264,12 @@ static inline int pkvm_pasid_setup_sl(struct device_domain_info *info,
 
 static inline int pkvm_pasid_teardown(struct device_domain_info *info,
 				      u32 pasid)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int pkvm_modify_irte(struct intel_iommu *iommu, int index,
+				   const struct irte *modified)
 {
 	return -EOPNOTSUPP;
 }

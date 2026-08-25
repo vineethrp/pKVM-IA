@@ -104,6 +104,7 @@ PKVM_HC_IN(iommu_pasid_teardown)
 PKVM_HC_INOUT(iommu_domain_map)
 PKVM_HC(iommu_domain_unmap)
 PKVM_HC(iommu_domain_sync)
+PKVM_HC_IN(iommu_modify_irte)
 #endif
 
 #undef PKVM_HC

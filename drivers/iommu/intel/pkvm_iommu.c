@@ -447,3 +447,23 @@ int pkvm_pasid_teardown(struct device_domain_info *info, u32 pasid)
 
 	return pkvm_hypercall_in(iommu_pasid_teardown, &d);
 }
+
+int pkvm_modify_irte(struct intel_iommu *iommu, int index,
+		     const struct irte *modified)
+{
+	union pkvm_hc_data d = {};
+	struct modify_irte_data *data = &d.iommu_modify_irte.data;
+	int ret;
+
+	data->phys = iommu->reg_phys;
+	data->index = index;
+	data->irte_lo = modified->low;
+	data->irte_hi = modified->high;
+
+	ret = pkvm_hypercall_in(iommu_modify_irte, &d);
+	if (ret)
+		pr_err("iommu%d: failed to modify IRTE%d: %d\n",
+		       iommu->seq_id, index, ret);
+
+	return ret;
+}
