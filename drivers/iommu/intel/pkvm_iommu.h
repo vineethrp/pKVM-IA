@@ -81,6 +81,7 @@ int pkvm_domain_map(void *root, int nid, unsigned long iova,
 		    phys_addr_t phys, size_t size, unsigned int prot,
 		    gfp_t gfp);
 int pkvm_domain_unmap(void *root, unsigned long iova, size_t size);
+int pkvm_domain_sync(void *root, unsigned long iova, size_t size);
 int pkvm_context_mapping(struct intel_iommu *iommu,
 			 struct device_domain_info *info, u8 bus, u8 devfn,
 			 u64 root_gpa, u16 did);
@@ -170,6 +171,7 @@ int pkvm_iommu_free_domain(u64 root_gpa, struct pkvm_memcache *mc);
 int pkvm_iommu_domain_map(struct iommu_domain_map_data *in,
 			  struct iommu_domain_map_data *out);
 int pkvm_iommu_domain_unmap(u64 root_gpa, unsigned long iova, size_t size);
+int pkvm_iommu_domain_sync(u64 root_gpa, unsigned long iova, size_t size);
 int pkvm_iommu_clear_ce(struct clear_ce_data *data);
 int pkvm_iommu_set_lm_ce(struct set_lm_ce_data *in,
 			 struct set_lm_ce_data *out);
@@ -208,6 +210,12 @@ static inline int pkvm_domain_map(void *root, int nid, unsigned long iova,
 
 static inline int pkvm_domain_unmap(void *root, unsigned long iova,
 				    size_t size)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int pkvm_domain_sync(void *root, unsigned long iova,
+				   size_t size)
 {
 	return -EOPNOTSUPP;
 }
