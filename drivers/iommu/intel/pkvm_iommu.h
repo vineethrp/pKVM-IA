@@ -72,8 +72,8 @@ int __init pkvm_scan_satc_devs(struct pkvm_iommu_device_id *satc_devs,
 int __init pkvm_host_prepare_iommu(void);
 int __init pkvm_host_init_iommu(void);
 
-int pkvm_qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
-			unsigned int count, unsigned long options);
+int pkvm_iec_flush(struct intel_iommu *iommu, bool global, int index,
+		   int mask);
 int pkvm_alloc_domain(struct intel_iommu *iommu, void *root, u8 agaw,
 		      bool use_first_level);
 int pkvm_free_domain(void *root);
@@ -163,7 +163,7 @@ int pkvm_intel_iommu_init(void);
 void pkvm_iommu_pt_flush(unsigned long paddr, unsigned long size);
 int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val);
 int pkvm_iommu_mmio_write(u64 phys, int len, u64 val);
-int pkvm_iommu_qi_submit(u64 phys, u64 desc_gpa, u32 count, u32 options);
+int pkvm_iommu_iec_flush(u64 phys, int index, int mask, bool global);
 int pkvm_iommu_alloc_domain(u64 iommu_phys, u64 root_gpa, u8 agaw,
 			    bool use_first_level);
 int pkvm_iommu_free_domain(u64 root_gpa, struct pkvm_memcache *mc);
@@ -182,9 +182,8 @@ int pkvm_iommu_pasid_setup_sl(struct pasid_setup_sl_data *in,
 int pkvm_iommu_pasid_teardown(struct pasid_teardown_data *data);
 #endif /* !__PKVM_HYP__ */
 #else /* !CONFIG_PKVM_INTEL */
-static inline int pkvm_qi_submit_sync(struct intel_iommu *iommu,
-				      struct qi_desc *desc, unsigned int count,
-				      unsigned long options)
+static inline int pkvm_iec_flush(struct intel_iommu *iommu, bool global,
+				 int index, int mask)
 {
 	return -EOPNOTSUPP;
 }
