@@ -250,10 +250,10 @@ out:
 	return ret;
 }
 
-int pkvm_domain_unmap(void *root, unsigned long iova, size_t size)
+int pkvm_domain_unmap(void *root, unsigned long iova, size_t size, bool sync)
 {
 	return pkvm_hypercall(iommu_domain_unmap, virt_to_phys(root), iova,
-			      size);
+			      size, sync);
 }
 
 int pkvm_domain_sync(void *root, unsigned long iova, size_t size)

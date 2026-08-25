@@ -270,7 +270,7 @@ static int iommu_pgtable_unuse_dma(struct pkvm_pgtable_visit_ctx *ctx,
 	const struct pkvm_pgtable_ops *pgt_ops = ctx->pgt->pgt_ops;
 	unsigned long phys;
 
-	if (!pgt_ops->pte_present(ctx->ptep))
+	if (!pgt_ops->pte_annotated(ctx->ptep))
 		return 0;
 
 	phys = pgt_ops->pte_to_phys(ctx->ptep);
@@ -305,13 +305,36 @@ out:
 	return ret;
 }
 
+static int iommu_pte_check_empty(struct pkvm_pgtable_visit_ctx *ctx,
+				 unsigned long flags, void *arg)
+{
+	const struct pkvm_pgtable_ops *pgt_ops = ctx->pgt->pgt_ops;
+
+	if (pgt_ops->pte_present(ctx->ptep) ||
+	    pgt_ops->pte_annotated(ctx->ptep))
+		return -EEXIST;
+
+	return 0;
+}
+
+static int pkvm_iommu_pgtable_check_empty(struct dmar_domain *domain,
+					  unsigned long iova, size_t size)
+{
+	struct pkvm_pgtable_walker walker = {
+		.cb = iommu_pte_check_empty,
+		.arg = NULL,
+		.walk_flags = PKVM_PGTABLE_WALK_LEAF,
+	};
+
+	return pkvm_pgtable_walk(&domain->pgt, iova, size, &walker);
+}
+
 int pkvm_iommu_pgtable_map(struct dmar_domain *domain, unsigned long iova,
 			   phys_addr_t phys, size_t size, u64 prot,
 			   struct pkvm_memcache *host_mc)
 {
 	phys_addr_t phys_end;
 	unsigned long iova_end;
-	unsigned long mapped_iova;
 	unsigned long required_pages;
 	int rollback_ret;
 	u64 pte_prot;
@@ -330,10 +353,9 @@ int pkvm_iommu_pgtable_map(struct dmar_domain *domain, unsigned long iova,
 	if (host_mc->flags != PKVM_MC_DONATE_SHARE_RO)
 		return -EINVAL;
 
-	pkvm_pgtable_lookup_range(&domain->pgt, iova, size, &mapped_iova,
-				  NULL, NULL, NULL);
-	if (mapped_iova != INVALID_PAGE)
-		return -EEXIST;
+	ret = pkvm_iommu_pgtable_check_empty(domain, iova, size);
+	if (ret)
+		return ret;
 
 	required_pages = __pkvm_pgtable_max_pages(size >> PAGE_SHIFT);
 	if (host_mc->count > required_pages)
@@ -390,12 +412,15 @@ static int validate_unmap_range(struct dmar_domain *domain,
 	unsigned long end = iova + size;
 	unsigned long phys;
 	unsigned long leaf_size;
+	u64 prot;
 	int level;
 
 	while (iova < end) {
-		pkvm_pgtable_lookup(&domain->pgt, iova, &phys, NULL, &level);
+		pkvm_pgtable_lookup(&domain->pgt, iova, &phys, &prot, &level);
 		if (!VALID_PAGE(phys))
 			return -ENOENT;
+		if (!(prot & IOMMU_PTE_MAPPED))
+			return -EFAULT;
 
 		leaf_size = pgt_ops->level_to_size(level);
 		if (!IS_ALIGNED(iova, leaf_size) || leaf_size > end - iova)
@@ -407,10 +432,32 @@ static int validate_unmap_range(struct dmar_domain *domain,
 	return 0;
 }
 
+static int iommu_pgtable_retire_leaf(struct pkvm_pgtable_visit_ctx *ctx,
+				     unsigned long flags, void *arg)
+{
+	const struct pkvm_pgtable_ops *pgt_ops = ctx->pgt->pgt_ops;
+	struct dmar_domain *domain;
+	u64 pte;
+
+	domain = container_of(ctx->pgt, struct dmar_domain, pgt);
+	pte = pgt_ops->pte_get(ctx->ptep);
+	if (domain->use_first_level)
+		pte &= ~DMA_FL_PTE_PRESENT;
+	else
+		pte &= ~(DMA_PTE_READ | DMA_PTE_WRITE);
+	pgt_ops->pte_set(ctx->ptep, pte);
+
+	return 0;
+}
+
 int pkvm_iommu_pgtable_unmap(struct dmar_domain *domain, unsigned long iova,
 			     size_t size)
 {
-	unsigned long mapped_iova, mapped_size, phys;
+	struct pkvm_pgtable_walker walker = {
+		.cb = iommu_pgtable_retire_leaf,
+		.arg = NULL,
+		.walk_flags = PKVM_PGTABLE_WALK_LEAF,
+	};
 	unsigned long iova_end;
 	int ret;
 
@@ -427,24 +474,59 @@ int pkvm_iommu_pgtable_unmap(struct dmar_domain *domain, unsigned long iova,
 		return -EBUSY;
 
 	current_iommu_domain = domain;
-	while (iova < iova_end) {
-		pkvm_pgtable_lookup_range(&domain->pgt, iova, iova_end - iova,
-					  &mapped_iova, &mapped_size,
-					  &phys, NULL);
-		if (WARN_ON(mapped_iova != iova || !mapped_size ||
-			    !VALID_PAGE(phys))) {
-			ret = -EFAULT;
-			break;
-		}
+	ret = pkvm_pgtable_walk(&domain->pgt, iova, size, &walker);
+	current_iommu_domain = NULL;
 
-		ret = pkvm_pgtable_unmap(&domain->pgt, iova, phys, mapped_size);
-		if (WARN_ON(ret))
-			break;
+	return ret;
+}
 
-		/* The invalidation completes before the DMA pins are released. */
-		pkvm_host_unuse_dma(phys, mapped_size);
-		iova += mapped_size;
-	}
+static int iommu_pgtable_release_retired(struct pkvm_pgtable_visit_ctx *ctx,
+					 unsigned long flags, void *arg)
+{
+	const struct pkvm_pgtable_mm_ops *mm_ops = ctx->pgt->mm_ops;
+	const struct pkvm_pgtable_ops *pgt_ops = ctx->pgt->pgt_ops;
+	unsigned long leaf_start, leaf_size;
+	unsigned long phys;
+
+	if (pgt_ops->pte_present(ctx->ptep) ||
+	    !pgt_ops->pte_annotated(ctx->ptep))
+		return 0;
+
+	leaf_size = pgt_ops->level_to_size(ctx->level);
+	leaf_start = ALIGN_DOWN(ctx->addr, leaf_size);
+	if (leaf_start < ctx->start || leaf_size > ctx->end - leaf_start)
+		return 0;
+
+	phys = pgt_ops->pte_to_phys(ctx->ptep);
+	pgt_ops->pte_set(ctx->ptep, 0);
+	mm_ops->put_page(ctx->ptep);
+	pkvm_host_unuse_dma(phys, leaf_size);
+
+	return 0;
+}
+
+int pkvm_iommu_pgtable_sync(struct dmar_domain *domain, unsigned long iova,
+			    size_t size)
+{
+	struct pkvm_pgtable_walker walker = {
+		.cb = iommu_pgtable_release_retired,
+		.arg = NULL,
+		.walk_flags = PKVM_PGTABLE_WALK_LEAF,
+	};
+	int ret;
+
+	if (WARN_ON_ONCE(current_iommu_domain))
+		return -EBUSY;
+
+	cache_tag_flush_range(domain, iova, iova + size - 1, 0);
+
+	/*
+	 * Keep empty page-table pages linked until domain teardown. Unlinking a
+	 * table after the flush would require another invalidation before that
+	 * page could be safely reused.
+	 */
+	current_iommu_domain = domain;
+	ret = pkvm_pgtable_walk(&domain->pgt, iova, size, &walker);
 	current_iommu_domain = NULL;
 
 	return ret;

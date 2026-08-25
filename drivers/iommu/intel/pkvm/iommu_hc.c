@@ -94,7 +94,8 @@ int pkvm_iommu_domain_map(struct iommu_domain_map_data *in,
 	return ret;
 }
 
-int pkvm_iommu_domain_unmap(u64 root_gpa, unsigned long iova, size_t size)
+int pkvm_iommu_domain_unmap(u64 root_gpa, unsigned long iova, size_t size,
+			    bool sync)
 {
 	phys_addr_t root = pkvm_host_gpa_to_phys(root_gpa);
 	struct dmar_domain *domain;
@@ -109,6 +110,8 @@ int pkvm_iommu_domain_unmap(u64 root_gpa, unsigned long iova, size_t size)
 
 	pkvm_spin_lock(&domain->lock);
 	ret = pkvm_iommu_pgtable_unmap(domain, iova, size);
+	if (!ret && sync)
+		ret = pkvm_iommu_pgtable_sync(domain, iova, size);
 	pkvm_spin_unlock(&domain->lock);
 	pkvm_put_iommu_domain(domain);
 
@@ -137,7 +140,7 @@ int pkvm_iommu_domain_sync(u64 root_gpa, unsigned long iova, size_t size)
 		goto out_unlock;
 	}
 
-	cache_tag_flush_range(domain, iova, end - 1, 0);
+	ret = pkvm_iommu_pgtable_sync(domain, iova, size);
 out_unlock:
 	pkvm_spin_unlock(&domain->lock);
 	pkvm_put_iommu_domain(domain);
