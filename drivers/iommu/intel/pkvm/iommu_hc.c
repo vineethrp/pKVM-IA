@@ -4,6 +4,7 @@
  *
  */
 #include <asm/kvm_pkvm.h>
+#include <linux/dmar.h>
 #include <linux/pci.h>
 #include "pkvm/mmu.h"
 #include "pkvm/memory.h"
@@ -460,5 +461,107 @@ int pkvm_iommu_pasid_teardown(struct pasid_teardown_data *data)
 
 out_unlock:
 	pkvm_spin_unlock(&iommu->lock);
+	return ret;
+}
+
+int pkvm_iommu_modify_irte(struct modify_irte_data *data)
+{
+	struct irte modified = {
+		.low = data->irte_lo,
+		.high = data->irte_hi,
+	};
+	struct intel_iommu *iommu = iommu_from_phys(data->phys);
+	unsigned long new_pda = ULONG_MAX;
+	unsigned long old_pda = ULONG_MAX;
+	bool irte_updated = false;
+	struct irte *irte;
+	int ret = 0;
+
+	if (!iommu)
+		return -EINVAL;
+
+	if (data->index >= SZ_1M / sizeof(*irte)) {
+		pkvm_err("iommu%d: IRTE index %u out of range\n",
+			 iommu->seq_id, data->index);
+		return -EINVAL;
+	}
+
+	if (modified.pst) {
+		/* Posted-mode reserved-zero bits: 2-7, 12-13, 24-37, 84-95. */
+		if (modified.p_res0 || modified.p_res1 ||
+		    modified.p_res2 || modified.p_res3)
+			return -EINVAL;
+	} else {
+		/* Remapped-mode reserved-zero bits: 12-14, 24-31, 84-127. */
+		if (modified.__res1 || modified.r_res1 || modified.__res3)
+			return -EINVAL;
+	}
+
+	pkvm_spin_lock(&iommu->lock);
+	if (!iommu->ir_table) {
+		pkvm_err("iommu%d: interrupt-remapping table is not set up\n",
+			 iommu->seq_id);
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	/* Pin the new posted-interrupt descriptor before publishing its PDA. */
+	if (modified.pst) {
+		new_pda = ((u64)modified.pda_h << 32) |
+			  ((u64)modified.pda_l << 6);
+
+		ret = pkvm_host_use_dma(PAGE_ALIGN_DOWN(new_pda), PAGE_SIZE);
+		if (ret) {
+			pkvm_err("iommu%d: failed to pin IRTE%u PDA %#lx: %d\n",
+				 iommu->seq_id, data->index, new_pda, ret);
+			goto out_unlock;
+		}
+	}
+
+	irte = &iommu->ir_table[data->index];
+	if (irte->pst)
+		old_pda = ((u64)irte->pda_h << 32) | ((u64)irte->pda_l << 6);
+
+	if (irte->pst || modified.pst) {
+		u128 old = irte->irte;
+
+		/*
+		 * Hardware may read an IRTE concurrently, so any transition to or
+		 * from posted mode must update all 128 bits atomically. Software is
+		 * the only writer and iommu->lock serializes it, so a failure means
+		 * an invariant was violated. Keep the old entry intact and fail the
+		 * hypercall instead of crashing pKVM.
+		 */
+		if (!try_cmpxchg128(&irte->irte, &old, modified.irte)) {
+			pkvm_err("iommu%d: concurrent update of IRTE%u\n",
+				 iommu->seq_id, data->index);
+			ret = -EAGAIN;
+			goto out_unlock;
+		}
+	} else {
+		WRITE_ONCE(irte->low, modified.low);
+		WRITE_ONCE(irte->high, modified.high);
+	}
+	irte_updated = true;
+
+	__iommu_flush_cache(iommu, irte, sizeof(*irte));
+
+out_unlock:
+	pkvm_spin_unlock(&iommu->lock);
+	if (!ret)
+		ret = qi_flush_iec(iommu, data->index, 0);
+
+	/* A failed publication never exposed the new descriptor to hardware. */
+	if (ret && !irte_updated && new_pda != ULONG_MAX)
+		pkvm_host_unuse_dma(PAGE_ALIGN_DOWN(new_pda), PAGE_SIZE);
+
+	/*
+	 * Release the old descriptor only after the IEC flush succeeds. If it
+	 * fails, the IOMMU may retain a cached reference, so leaking the pin is
+	 * safer than allowing the host to reclaim or donate the page.
+	 */
+	if (!ret && old_pda != ULONG_MAX)
+		pkvm_host_unuse_dma(PAGE_ALIGN_DOWN(old_pda), PAGE_SIZE);
+
 	return ret;
 }

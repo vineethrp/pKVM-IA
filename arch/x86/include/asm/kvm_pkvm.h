@@ -133,6 +133,14 @@ struct iommu_domain_map_data {
 	u64 prot;
 	struct pkvm_memcache mc;
 };
+
+struct modify_irte_data {
+	u64 phys;
+	u32 index;
+	u32 pad;
+	u64 irte_lo;
+	u64 irte_hi;
+};
 #endif
 
 #define TO_PKVM_HC(f)		CONCATENATE(__pkvm__, f)
@@ -242,6 +250,9 @@ union pkvm_hc_data {
 		struct iommu_domain_map_data in;
 		struct iommu_domain_map_data out;
 	} iommu_domain_map;
+	struct {
+		struct modify_irte_data data;
+	} iommu_modify_irte;
 #endif
 	struct {
 		bool has_intr;

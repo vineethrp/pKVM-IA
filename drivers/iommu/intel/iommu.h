@@ -800,6 +800,7 @@ struct intel_iommu {
 	struct q_inval _qi;
 	struct q_inval *qi;
 	struct iommu_flush flush;
+	struct irte *ir_table;
 	struct root_entry *root_entry;
 	/* Page supplied by the host for a new context or PASID table. */
 	void *donation_page;
