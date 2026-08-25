@@ -256,6 +256,12 @@ int pkvm_domain_unmap(void *root, unsigned long iova, size_t size)
 			      size);
 }
 
+int pkvm_domain_sync(void *root, unsigned long iova, size_t size)
+{
+	return pkvm_hypercall(iommu_domain_sync, virt_to_phys(root), iova,
+			      size);
+}
+
 int pkvm_context_mapping(struct intel_iommu *iommu,
 			 struct device_domain_info *info, u8 bus, u8 devfn,
 			 u64 root_gpa, u16 did)
