@@ -792,6 +792,7 @@ struct intel_iommu {
 	u32 vgsts;
 	u64 viqa;
 	u64 vrta;
+	u64 virta;
 	u16 segment;
 	bool scalable_mode;
 	int seq_id;
