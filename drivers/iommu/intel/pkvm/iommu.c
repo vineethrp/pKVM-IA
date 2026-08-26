@@ -14,6 +14,12 @@ static struct pkvm_iommu_device_id satc_devs[PKVM_MAX_SATC_DEVS];
 static unsigned int nr_satc_devs;
 unsigned int iommu_pgsz_mask;
 unsigned int iommu_pglvl_mask;
+static bool iommu_superpages_enabled;
+
+bool pkvm_iommu_superpages_enabled(void)
+{
+	return iommu_superpages_enabled;
+}
 
 /* x86 MSI address fields used by DMAR fault and performance interrupts. */
 #define X86_MSI_ADDR_BASE		0xfee00000U
@@ -883,6 +889,9 @@ int __init pkvm_prepare_iommus(const struct pkvm_iommu_info *infos,
 	    satc_count > ARRAY_SIZE(satc_devs) || (satc_count && !satc))
 		return -EINVAL;
 
+	if (!infos[0].superpage_enabled)
+		pgsz_mask = BIT(PG_LEVEL_4K);
+
 	for (i = 0; i < count; i++) {
 		const struct pkvm_iommu_info *info = &infos[i];
 		unsigned int unit_pgsz_mask = BIT(PG_LEVEL_4K);
@@ -890,7 +899,8 @@ int __init pkvm_prepare_iommus(const struct pkvm_iommu_info *infos,
 
 		if (!info->reg_phys || !PAGE_ALIGNED(info->reg_phys) ||
 		    !info->reg_size || !PAGE_ALIGNED(info->reg_size) ||
-		    info->reg_phys + info->reg_size < info->reg_phys)
+		    info->reg_phys + info->reg_size < info->reg_phys ||
+		    info->superpage_enabled != infos[0].superpage_enabled)
 			return -EINVAL;
 
 		unit_pglvl_mask = cap_sagaw(info->cap) &
@@ -948,6 +958,7 @@ int __init pkvm_prepare_iommus(const struct pkvm_iommu_info *infos,
 	nr_satc_devs = satc_count;
 	iommu_pglvl_mask = pglvl_mask;
 	iommu_pgsz_mask = pgsz_mask;
+	iommu_superpages_enabled = infos[0].superpage_enabled;
 	return 0;
 }
 

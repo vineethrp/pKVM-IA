@@ -21,6 +21,9 @@ static unsigned int domain_pgsize_mask(struct intel_iommu *iommu,
 {
 	unsigned int mask = BIT(PG_LEVEL_4K) | BIT(PG_LEVEL_2M);
 
+	if (!pkvm_iommu_superpages_enabled())
+		return BIT(PG_LEVEL_4K);
+
 	if (use_first_level) {
 		if (cap_fl1gp_support(iommu->cap))
 			mask |= BIT(PG_LEVEL_1G);
