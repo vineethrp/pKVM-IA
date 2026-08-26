@@ -445,8 +445,11 @@ int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 		*val = iommu->vgsts;
 		break;
 	default:
+		ret = pkvm_iommu_pmu_validate_read(iommu, offset, len);
+
 		/* Registers not emulated by pKVM pass through to hardware. */
-		ret = iommu_direct_mmio_read(iommu, phys, len, val);
+		if (!ret || ret == IOMMU_REG_NOT_HANDLED)
+			ret = iommu_direct_mmio_read(iommu, phys, len, val);
 	}
 
 	pkvm_spin_unlock(&iommu->lock);
@@ -622,8 +625,11 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 		}
 		break;
 	default:
+		ret = pkvm_iommu_pmu_validate_write(iommu, offset, len, val);
+
 		/* Registers not emulated by pKVM pass through to hardware. */
-		ret = iommu_direct_mmio_write(iommu, phys, len, val);
+		if (!ret || ret == IOMMU_REG_NOT_HANDLED)
+			ret = iommu_direct_mmio_write(iommu, phys, len, val);
 	}
 
 	pkvm_spin_unlock(&iommu->lock);
@@ -848,6 +854,7 @@ int pkvm_intel_iommu_init(void)
 		}
 
 		pkvm_spin_lock_init(&iommu->lock);
+		pkvm_iommu_pmu_init(iommu);
 		iommu->vgsts = readl(iommu->reg + DMAR_GSTS_REG);
 
 		/*
