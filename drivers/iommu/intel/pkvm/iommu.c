@@ -514,6 +514,35 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 			 iommu->seq_id);
 		ret = -EPERM;
 		break;
+	case DMAR_FECTL_REG: {
+		u32 rsvdp_mask = GENMASK_U32(29, 0);
+		u32 rsvdp = readl(iommu->reg + DMAR_FECTL_REG) &
+			    rsvdp_mask;
+
+		if ((val & rsvdp_mask) != rsvdp) {
+			pkvm_err("iommu%d: FECTL reserved bits mismatch: %#x != %#x\n",
+				 iommu->seq_id, rsvdp,
+				 (u32)val & rsvdp_mask);
+			ret = -EINVAL;
+		} else {
+			ret = iommu_direct_mmio_write(iommu, phys, len, val);
+		}
+		break;
+	}
+	case DMAR_FSTS_REG:
+		/*
+		 * DMA_FSTS_PRO is deprecated and reserved-zero since VT-d 3.1,
+		 * but the host driver still clears it. Keep accepting bit 7.
+		 */
+		if (val & (GENMASK_U32(31, 16) | GENMASK_U32(3, 2))) {
+			pkvm_err("iommu%d: FSTS %#llx has reserved bits set\n",
+				 iommu->seq_id, val);
+			ret = -EINVAL;
+		} else {
+			/* FSTS fault bits are cleared by writing one. */
+			ret = iommu_direct_mmio_write(iommu, phys, len, val);
+		}
+		break;
 	default:
 		/* Registers not emulated by pKVM pass through to hardware. */
 		ret = iommu_direct_mmio_write(iommu, phys, len, val);
