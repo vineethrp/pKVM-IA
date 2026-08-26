@@ -631,8 +631,16 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 		if (ret == IOMMU_REG_NOT_HANDLED)
 			ret = pkvm_iommu_frcd_validate_write(iommu, offset, len, val);
 
-		/* Registers not emulated by pKVM pass through to hardware. */
-		if (!ret || ret == IOMMU_REG_NOT_HANDLED)
+		if (ret == IOMMU_REG_NOT_HANDLED) {
+			/*
+			 * Deny-by-default. Registers needed by the host must be
+			 * explicitly handled and validated before reaching hardware.
+			 */
+			pkvm_err("iommu%d: unsupported write at %#llx: %#llx\n",
+				 iommu->seq_id, offset, val);
+			ret = -EOPNOTSUPP;
+		}
+		if (!ret)
 			ret = iommu_direct_mmio_write(iommu, phys, len, val);
 	}
 
