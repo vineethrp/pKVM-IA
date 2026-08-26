@@ -19,10 +19,9 @@ unsigned int iommu_pglvl_mask;
 #define DMAR_GSTS_EN_BITS	(DMA_GCMD_TE | DMA_GCMD_QIE | \
 				 DMA_GCMD_IRE | DMA_GCMD_CFI)
 /* One-shot GCMD bits that have no effect when cleared. */
-#define DMAR_GCMD_ONESHOT	(DMA_GCMD_SRTP | DMA_GCMD_SIRTP)
+#define DMAR_GCMD_ONESHOT	DMA_GCMD_SRTP
 /* GCMD bits that may pass directly through to hardware. */
-#define DMAR_GCMD_DIRECT	(DMA_GCMD_IRE | DMA_GCMD_CFI | \
-				 DMA_GCMD_SIRTP)
+#define DMAR_GCMD_DIRECT	(DMA_GCMD_IRE | DMA_GCMD_CFI)
 /* GCMD bits currently understood by pKVM. */
 #define DMAR_GCMD_SUPPORTED	(DMAR_GSTS_EN_BITS | DMAR_GCMD_ONESHOT)
 
@@ -307,6 +306,33 @@ static int handle_gcmd_srtp(struct intel_iommu *iommu)
 	return 0;
 }
 
+static int iommu_protect_ir_table(struct intel_iommu *iommu)
+{
+	phys_addr_t ir_table_pa;
+	int ret;
+
+	if (!iommu->virta) {
+		pkvm_err("iommu%d: IRTA not set\n", iommu->seq_id);
+		return -EINVAL;
+	}
+
+	ir_table_pa = pkvm_host_gpa_to_phys(iommu->virta & VTD_PAGE_MASK);
+	/*
+	 * Interrupt remapping is initialized before the host is
+	 * deprivileged. Preserve the trusted entries while making the table
+	 * read-only to the host.
+	 */
+	ret = pkvm_host_donate_hyp_share_ro(ir_table_pa, SZ_1M, false);
+	if (ret) {
+		pkvm_err("iommu%d: failed to protect IR table: %d\n",
+			 iommu->seq_id, ret);
+		return ret;
+	}
+
+	iommu->ir_table = __pkvm_va(ir_table_pa);
+	return 0;
+}
+
 static int handle_gcmd_te(struct intel_iommu *iommu, bool enable)
 {
 	int ret;
@@ -404,6 +430,9 @@ int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 	case DMAR_RTADDR_REG:
 		*val = iommu->vrta;
 		break;
+	case DMAR_IRTA_REG:
+		*val = iommu->virta;
+		break;
 	case DMAR_GSTS_REG:
 		*val = iommu->vgsts;
 		break;
@@ -471,6 +500,11 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 		} else {
 			iommu->vrta = val;
 		}
+		break;
+	case DMAR_IRTA_REG:
+		pkvm_err("iommu%d: IRTA writes are not supported\n",
+			 iommu->seq_id);
+		ret = -EPERM;
 		break;
 	default:
 		/* Registers not emulated by pKVM pass through to hardware. */
@@ -590,6 +624,22 @@ int pkvm_intel_iommu_init(void)
 
 		pkvm_spin_lock_init(&iommu->lock);
 		iommu->vgsts = readl(iommu->reg + DMAR_GSTS_REG);
+		/*
+		 * Interrupt remapping is enabled while x2APIC mode is set up,
+		 * before pKVM initialization. Protect the active table before
+		 * the host is allowed to modify interrupt entries again.
+		 */
+		if (!(iommu->vgsts & DMA_GSTS_IRTPS) ||
+		    !(iommu->vgsts & DMA_GSTS_IRES)) {
+			pkvm_err("iommu%d: interrupt remapping not initialized\n",
+				 iommu->seq_id);
+			return -EINVAL;
+		}
+
+		iommu->virta = readq(iommu->reg + DMAR_IRTA_REG);
+		ret = iommu_protect_ir_table(iommu);
+		if (ret)
+			return ret;
 	}
 
 	return pkvm_iommu_domain_init();

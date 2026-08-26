@@ -156,6 +156,12 @@ static int modify_irte(struct irq_2_iommu *irq_iommu,
 	iommu = irq_iommu->iommu;
 
 	index = irq_iommu->irte_index + irq_iommu->sub_handle;
+	if (pkvm_enabled()) {
+		rc = pkvm_modify_irte(iommu, index, irte_modified);
+		raw_spin_unlock_irqrestore(&irq_2_ir_lock, flags);
+		return rc;
+	}
+
 	irte = &iommu->ir_table->base[index];
 
 	if ((irte->pst == 1) || (irte_modified->pst == 1)) {
@@ -220,6 +226,22 @@ static int clear_entries(struct irq_2_iommu *irq_iommu)
 
 	iommu = irq_iommu->iommu;
 	index = irq_iommu->irte_index;
+	if (pkvm_enabled()) {
+		struct irte zero = {};
+		int count = 1 << irq_iommu->irte_mask;
+		int i, ret = 0;
+
+		for (i = 0; i < count; i++) {
+			ret = pkvm_modify_irte(iommu, index + i, &zero);
+			if (ret)
+				break;
+		}
+
+		if (i)
+			bitmap_clear(iommu->ir_table->bitmap, index, i);
+
+		return ret;
+	}
 
 	start = iommu->ir_table->base + index;
 	end = start + (1 << irq_iommu->irte_mask);
