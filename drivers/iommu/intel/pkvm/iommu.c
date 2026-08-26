@@ -15,6 +15,14 @@ static unsigned int nr_satc_devs;
 unsigned int iommu_pgsz_mask;
 unsigned int iommu_pglvl_mask;
 
+/* x86 MSI address fields used by DMAR fault and performance interrupts. */
+#define X86_MSI_ADDR_BASE		0xfee00000U
+#define X86_MSI_ADDR_MASK		0xfff00ff3U
+#define X86_MSI_ADDR_DEST_ID_MASK	GENMASK_U32(19, 12)
+#define X86_MSI_ADDR_DEST_ID_SHIFT	12
+#define X86_MSI_ADDR_DEST_MODE_LOGICAL	BIT(2)
+#define X86_MSI_UADDR_DEST_ID_MASK	GENMASK_U32(31, 8)
+
 /* GCMD bits that enable or disable IOMMU features. */
 #define DMAR_GSTS_EN_BITS	(DMA_GCMD_TE | DMA_GCMD_QIE | \
 				 DMA_GCMD_IRE | DMA_GCMD_CFI)
@@ -513,6 +521,116 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 
 	pkvm_spin_unlock(&iommu->lock);
 	return ret;
+}
+
+static u32 iommu_msi_dest_id(u32 addr, u32 uaddr)
+{
+	return ((addr & X86_MSI_ADDR_DEST_ID_MASK) >>
+		X86_MSI_ADDR_DEST_ID_SHIFT) |
+	       (uaddr & X86_MSI_UADDR_DEST_ID_MASK);
+}
+
+static bool iommu_msi_dest_id_valid(u32 dest_id)
+{
+	struct pkvm_pcpu *pcpu;
+	int i;
+
+	for_each_pkvm_pcpu(i, pcpu) {
+		u32 pcpu_dest_id = msi_dest_mode_logical ?
+				   pcpu->msi_dest_id : pcpu->apic_id;
+
+		if (dest_id == pcpu_dest_id)
+			return true;
+	}
+
+	return false;
+}
+
+static int iommu_validate_msi_dest_id(struct intel_iommu *iommu, u32 addr,
+				      u32 uaddr, const char *name)
+{
+	u32 dest_id = iommu_msi_dest_id(addr, uaddr);
+
+	if (!iommu_msi_dest_id_valid(dest_id)) {
+		pkvm_err("iommu%d: %s MSI destination %#x is not a pKVM CPU\n",
+			 iommu->seq_id, name, dest_id);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int iommu_validate_msi_msg(struct intel_iommu *iommu, u32 offset,
+				  u32 data, u32 addr, u32 uaddr,
+				  const char *name)
+{
+	if (offset == DMAR_PERFINTRCTL_REG && !ecap_pms(iommu->ecap)) {
+		pkvm_err("iommu%d: perf MSI write without PMU support\n",
+			 iommu->seq_id);
+		return -EINVAL;
+	}
+
+	if (data >> 9) {
+		pkvm_err("iommu%d: %s MSI data %#x has reserved bits set\n",
+			 iommu->seq_id, name, data);
+		return -EINVAL;
+	}
+
+	if ((addr & X86_MSI_ADDR_MASK) != X86_MSI_ADDR_BASE) {
+		pkvm_err("iommu%d: %s MSI address %#x is invalid\n",
+			 iommu->seq_id, name, addr);
+		return -EINVAL;
+	}
+
+	if (!!(addr & X86_MSI_ADDR_DEST_MODE_LOGICAL) !=
+	    msi_dest_mode_logical) {
+		pkvm_err("iommu%d: %s MSI destination mode is invalid\n",
+			 iommu->seq_id, name);
+		return -EINVAL;
+	}
+
+	if (uaddr & GENMASK_U32(7, 0)) {
+		pkvm_err("iommu%d: %s MSI upper address %#x is invalid\n",
+			 iommu->seq_id, name, uaddr);
+		return -EINVAL;
+	}
+
+	return iommu_validate_msi_dest_id(iommu, addr, uaddr, name);
+}
+
+int pkvm_iommu_msi_write(u64 phys, u32 offset, u32 data, u32 addr, u32 uaddr)
+{
+	struct intel_iommu *iommu = iommu_from_phys(phys);
+	const char *name;
+	int ret;
+
+	if (!iommu)
+		return -EINVAL;
+
+	switch (offset) {
+	case DMAR_FECTL_REG:
+		name = "fault event";
+		break;
+	case DMAR_PERFINTRCTL_REG:
+		name = "performance monitoring";
+		break;
+	default:
+		pkvm_err("iommu%d: unsupported MSI register group %#x\n",
+			 iommu->seq_id, offset);
+		return -EOPNOTSUPP;
+	}
+
+	ret = iommu_validate_msi_msg(iommu, offset, data, addr, uaddr, name);
+	if (ret)
+		return ret;
+
+	pkvm_spin_lock(&iommu->lock);
+	writel(data, iommu->reg + offset + 4);
+	writel(addr, iommu->reg + offset + 8);
+	writel(uaddr, iommu->reg + offset + 12);
+	pkvm_spin_unlock(&iommu->lock);
+
+	return 0;
 }
 
 static bool ranges_overlap(u64 start_a, u64 size_a, u64 start_b, u64 size_b)

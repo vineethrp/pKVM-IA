@@ -98,6 +98,8 @@ int pkvm_pasid_setup_sl(struct device_domain_info *info,
 int pkvm_pasid_teardown(struct device_domain_info *info, u32 pasid);
 int pkvm_modify_irte(struct intel_iommu *iommu, int index,
 		     const struct irte *modified);
+int pkvm_write_iommu_msi(struct intel_iommu *iommu, u32 offset, u32 data,
+			 u32 addr, u32 uaddr);
 #else
 extern unsigned int iommu_pglvl_mask;
 extern unsigned int iommu_pgsz_mask;
@@ -169,6 +171,7 @@ int pkvm_intel_iommu_init(void);
 void pkvm_iommu_pt_flush(unsigned long paddr, unsigned long size);
 int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val);
 int pkvm_iommu_mmio_write(u64 phys, int len, u64 val);
+int pkvm_iommu_msi_write(u64 phys, u32 offset, u32 data, u32 addr, u32 uaddr);
 int pkvm_iommu_iec_flush(u64 phys, int index, int mask, bool global);
 int pkvm_iommu_alloc_domain(u64 iommu_phys, u64 root_gpa, u8 agaw,
 			    bool use_first_level);
@@ -270,6 +273,12 @@ static inline int pkvm_pasid_teardown(struct device_domain_info *info,
 
 static inline int pkvm_modify_irte(struct intel_iommu *iommu, int index,
 				   const struct irte *modified)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int pkvm_write_iommu_msi(struct intel_iommu *iommu, u32 offset,
+				       u32 data, u32 addr, u32 uaddr)
 {
 	return -EOPNOTSUPP;
 }
