@@ -514,14 +514,23 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 			 iommu->seq_id);
 		ret = -EPERM;
 		break;
+	case DMAR_PERFINTRCTL_REG:
+		if (!ecap_pms(iommu->ecap) && val) {
+			pkvm_err("iommu%d: perf interrupt control without PMU support\n",
+				 iommu->seq_id);
+			ret = -EINVAL;
+			break;
+		}
+		fallthrough;
 	case DMAR_FECTL_REG: {
 		u32 rsvdp_mask = GENMASK_U32(29, 0);
-		u32 rsvdp = readl(iommu->reg + DMAR_FECTL_REG) &
-			    rsvdp_mask;
+		u32 rsvdp = readl(iommu->reg + offset) & rsvdp_mask;
 
 		if ((val & rsvdp_mask) != rsvdp) {
-			pkvm_err("iommu%d: FECTL reserved bits mismatch: %#x != %#x\n",
-				 iommu->seq_id, rsvdp,
+			pkvm_err("iommu%d: %s reserved bits mismatch: %#x != %#x\n",
+				 iommu->seq_id,
+				 offset == DMAR_FECTL_REG ?
+				 "FECTL" : "PERFINTRCTL", rsvdp,
 				 (u32)val & rsvdp_mask);
 			ret = -EINVAL;
 		} else {
@@ -529,6 +538,18 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 		}
 		break;
 	}
+	case DMAR_PERFINTRSTS_REG:
+		if (val & (GENMASK_ULL(31, 1) |
+			   (ecap_pms(iommu->ecap) ?
+			    0 : DMA_PERFINTRSTS_PIS))) {
+			pkvm_err("iommu%d: PERFINTRSTS %#llx has reserved bits set\n",
+				 iommu->seq_id, val);
+			ret = -EINVAL;
+		} else {
+			/* The interrupt-pending status is cleared by writing one. */
+			ret = iommu_direct_mmio_write(iommu, phys, len, val);
+		}
+		break;
 	case DMAR_FSTS_REG:
 		/*
 		 * DMA_FSTS_PRO is deprecated and reserved-zero since VT-d 3.1,
