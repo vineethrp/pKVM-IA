@@ -33,6 +33,7 @@ struct pkvm_iommu_info {
 	u64 ecap;
 	u16 segment;
 	bool scalable_mode;
+	bool superpage_enabled;
 	int seq_id;
 	int agaw;
 	int msagaw;
@@ -133,6 +134,7 @@ static inline bool is_iommu_mmio(u64 phys)
 
 bool overlaps_iommu_mmio(u64 phys, u64 size);
 bool is_dev_in_satc(u16 segment, u16 bdf);
+bool pkvm_iommu_superpages_enabled(void);
 
 int pkvm_iommu_domain_init(void);
 void pkvm_iommu_pgtable_init(struct dmar_domain *domain,
