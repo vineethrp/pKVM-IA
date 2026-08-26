@@ -83,10 +83,13 @@ bool overlaps_iommu_mmio(u64 phys, u64 size)
 }
 
 static int iommu_direct_mmio_read(struct intel_iommu *iommu, u64 phys,
-				  int len, u64 *val)
+				  int len, int expected_len, u64 *val)
 {
 	u64 offset = phys - iommu->reg_phys;
 	void __iomem *reg = iommu->reg + offset;
+
+	if (len > expected_len)
+		return -EINVAL;
 
 	switch (len) {
 	case 4:
@@ -104,10 +107,13 @@ static int iommu_direct_mmio_read(struct intel_iommu *iommu, u64 phys,
 }
 
 static int iommu_direct_mmio_write(struct intel_iommu *iommu, u64 phys,
-				   int len, u64 val)
+				   int len, int expected_len, u64 val)
 {
 	u64 offset = phys - iommu->reg_phys;
 	void __iomem *reg = iommu->reg + offset;
+
+	if (len > expected_len)
+		return -EINVAL;
 
 	switch (len) {
 	case 4:
@@ -441,6 +447,7 @@ int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 	case DMAR_GSTS_REG:
 		*val = iommu->vgsts;
 		break;
+	/* 32-bit registers */
 	case DMAR_VER_REG:
 	case DMAR_PMEN_REG:
 	case DMAR_PRS_REG:
@@ -451,21 +458,12 @@ int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 	case DMAR_PERFINTRCTL_REG:
 	case DMAR_FSTS_REG:
 	case DMAR_FECTL_REG:
-	case DMAR_IQH_REG:
-	case DMAR_IQT_REG:
-	case DMAR_ECRSP_REG:
-	case DMAR_IQER_REG:
-	case DMAR_PERFCAP_REG:
-	case DMAR_ECCAP_REG:
-	case DMAR_ECCAP_REG + DMA_ECMD_REG_STEP:
-	case DMAR_ECCAP_REG + 2 * DMA_ECMD_REG_STEP:
-	case DMAR_ECCAP_REG + 3 * DMA_ECMD_REG_STEP:
 #ifdef CONFIG_INTEL_IOMMU_DEBUGFS
 	/*
-	 * These registers are read only by the Intel IOMMU debugfs register
-	 * dump (iommu_regs_{32,64}[] in debugfs.c); the core driver never reads
-	 * them. Allow them only when debugfs is built, so a production
-	 * deny-by-default build keeps to least privilege.
+	 * 32-bit registers read only by the Intel IOMMU debugfs register dump
+	 * (iommu_regs_32[] in debugfs.c); the core driver never reads them, so
+	 * allow them only when debugfs is built (deny-by-default keeps least
+	 * privilege in production).
 	 */
 	case DMAR_GCMD_REG:
 	case DMAR_PLMBASE_REG:
@@ -481,6 +479,24 @@ int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 	case DMAR_FEDATA_REG:
 	case DMAR_FEADDR_REG:
 	case DMAR_FEUADDR_REG:
+#endif
+		ret = iommu_direct_mmio_read(iommu, phys, len, 4, val);
+		break;
+	/* 64-bit registers */
+	case DMAR_IQH_REG:
+	case DMAR_IQT_REG:
+	case DMAR_ECRSP_REG:
+	case DMAR_IQER_REG:
+	case DMAR_PERFCAP_REG:
+	case DMAR_ECCAP_REG:
+	case DMAR_ECCAP_REG + DMA_ECMD_REG_STEP:
+	case DMAR_ECCAP_REG + 2 * DMA_ECMD_REG_STEP:
+	case DMAR_ECCAP_REG + 3 * DMA_ECMD_REG_STEP:
+#ifdef CONFIG_INTEL_IOMMU_DEBUGFS
+	/*
+	 * 64-bit registers read only by the Intel IOMMU debugfs register dump
+	 * (iommu_regs_64[] in debugfs.c); same rationale as the 32-bit block.
+	 */
 	case DMAR_PHMBASE_REG:
 	case DMAR_PHMLIMIT_REG:
 	case DMAR_PQH_REG:
@@ -520,7 +536,7 @@ int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 	case DMAR_MTRR_PHYSBASE9_REG:
 	case DMAR_MTRR_PHYSMASK9_REG:
 #endif
-		ret = iommu_direct_mmio_read(iommu, phys, len, val);
+		ret = iommu_direct_mmio_read(iommu, phys, len, 8, val);
 		break;
 	default:
 		ret = pkvm_iommu_pmu_validate_read(iommu, offset, len);
@@ -539,7 +555,7 @@ int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val)
 			ret = -EOPNOTSUPP;
 		}
 		if (!ret)
-			ret = iommu_direct_mmio_read(iommu, phys, len, val);
+			ret = iommu_direct_mmio_read(iommu, phys, len, len, val);
 	}
 
 	pkvm_spin_unlock(&iommu->lock);
@@ -622,7 +638,7 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 				 iommu->seq_id);
 			ret = -EPERM;
 		} else {
-			ret = iommu_direct_mmio_write(iommu, phys, len, val);
+			ret = iommu_direct_mmio_write(iommu, phys, len, 4, val);
 		}
 		break;
 	}
@@ -632,7 +648,7 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 				 iommu->seq_id);
 			ret = -EINVAL;
 		} else {
-			ret = iommu_direct_mmio_write(iommu, phys, len, val);
+			ret = iommu_direct_mmio_write(iommu, phys, len, 8, val);
 		}
 		break;
 	case DMAR_ECMD_REG:
@@ -660,7 +676,7 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 					 iommu->seq_id, ecmd);
 				ret = -EPERM;
 			} else {
-				ret = iommu_direct_mmio_write(iommu, phys, len, val);
+				ret = iommu_direct_mmio_write(iommu, phys, len, 8, val);
 			}
 		}
 		break;
@@ -684,7 +700,7 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 				 (u32)val & rsvdp_mask);
 			ret = -EINVAL;
 		} else {
-			ret = iommu_direct_mmio_write(iommu, phys, len, val);
+			ret = iommu_direct_mmio_write(iommu, phys, len, 4, val);
 		}
 		break;
 	}
@@ -697,7 +713,7 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 			ret = -EINVAL;
 		} else {
 			/* The interrupt-pending status is cleared by writing one. */
-			ret = iommu_direct_mmio_write(iommu, phys, len, val);
+			ret = iommu_direct_mmio_write(iommu, phys, len, 4, val);
 		}
 		break;
 	case DMAR_FSTS_REG:
@@ -711,7 +727,7 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 			ret = -EINVAL;
 		} else {
 			/* FSTS fault bits are cleared by writing one. */
-			ret = iommu_direct_mmio_write(iommu, phys, len, val);
+			ret = iommu_direct_mmio_write(iommu, phys, len, 4, val);
 		}
 		break;
 	default:
@@ -729,7 +745,7 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 			ret = -EOPNOTSUPP;
 		}
 		if (!ret)
-			ret = iommu_direct_mmio_write(iommu, phys, len, val);
+			ret = iommu_direct_mmio_write(iommu, phys, len, len, val);
 	}
 
 	pkvm_spin_unlock(&iommu->lock);
