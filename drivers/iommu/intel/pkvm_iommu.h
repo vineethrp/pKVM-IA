@@ -135,6 +135,7 @@ static inline bool is_iommu_mmio(u64 phys)
 bool overlaps_iommu_mmio(u64 phys, u64 size);
 bool is_dev_in_satc(u16 segment, u16 bdf);
 bool pkvm_iommu_superpages_enabled(void);
+bool pkvm_iommu_paging_structure_coherency(void);
 
 int pkvm_iommu_domain_init(void);
 void pkvm_iommu_pgtable_init(struct dmar_domain *domain,
