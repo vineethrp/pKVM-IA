@@ -121,6 +121,20 @@ int __init pkvm_host_prepare_iommu(void)
 			goto out;
 		}
 
+		if (!ecap_ir_support(iommu->ecap)) {
+			pr_warn("iommu%d lacks interrupt remapping\n",
+				iommu->seq_id);
+			ret = -EOPNOTSUPP;
+			goto out;
+		}
+
+		if (!ecap_eim_support(iommu->ecap)) {
+			pr_warn("iommu%d lacks extended interrupt mode\n",
+				iommu->seq_id);
+			ret = -EOPNOTSUPP;
+			goto out;
+		}
+
 		info = &infos[nr_iommus++];
 		info->reg_phys = iommu->reg_phys;
 		info->reg_size = iommu->reg_size;
