@@ -15,10 +15,16 @@ static unsigned int nr_satc_devs;
 unsigned int iommu_pgsz_mask;
 unsigned int iommu_pglvl_mask;
 static bool iommu_superpages_enabled;
+static bool iommu_paging_structure_coherent = true;
 
 bool pkvm_iommu_superpages_enabled(void)
 {
 	return iommu_superpages_enabled;
+}
+
+bool pkvm_iommu_paging_structure_coherency(void)
+{
+	return iommu_paging_structure_coherent;
 }
 
 /* x86 MSI address fields used by DMAR fault and performance interrupts. */
@@ -883,6 +889,7 @@ int __init pkvm_prepare_iommus(const struct pkvm_iommu_info *infos,
 				 BIT(PG_LEVEL_1G);
 	unsigned int pglvl_mask = PKVM_IOMMU_PGT_4LEVEL |
 				  PKVM_IOMMU_PGT_5LEVEL;
+	bool paging_structure_coherent = true;
 	unsigned int i, j;
 
 	if (!infos || !count || count > ARRAY_SIZE(iommus) || nr_iommus ||
@@ -902,6 +909,9 @@ int __init pkvm_prepare_iommus(const struct pkvm_iommu_info *infos,
 		    info->reg_phys + info->reg_size < info->reg_phys ||
 		    info->superpage_enabled != infos[0].superpage_enabled)
 			return -EINVAL;
+
+		paging_structure_coherent &= info->scalable_mode ?
+			ecap_smpwc(info->ecap) : ecap_coherent(info->ecap);
 
 		unit_pglvl_mask = cap_sagaw(info->cap) &
 				  (PKVM_IOMMU_PGT_4LEVEL |
@@ -959,6 +969,7 @@ int __init pkvm_prepare_iommus(const struct pkvm_iommu_info *infos,
 	iommu_pglvl_mask = pglvl_mask;
 	iommu_pgsz_mask = pgsz_mask;
 	iommu_superpages_enabled = infos[0].superpage_enabled;
+	iommu_paging_structure_coherent = paging_structure_coherent;
 	return 0;
 }
 
