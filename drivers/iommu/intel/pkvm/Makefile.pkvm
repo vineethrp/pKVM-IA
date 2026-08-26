@@ -8,6 +8,7 @@ pkvm-iommu := ../../../../drivers/iommu/intel/pkvm
 intel-iommu := ../../../../drivers/iommu/intel
 
 pkvm-hyp-$(CONFIG_PKVM_INTEL) += $(pkvm-iommu)/iommu.o \
+				 $(pkvm-iommu)/iommu_frcd.o \
 				 $(pkvm-iommu)/iommu_pmu.o \
 				 $(pkvm-iommu)/iommu_hc.o \
 				 $(pkvm-iommu)/domain.o \
