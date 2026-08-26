@@ -514,6 +514,25 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 			 iommu->seq_id);
 		ret = -EPERM;
 		break;
+	case DMAR_PMEN_REG: {
+		u32 rsvdp_mask = GENMASK_U32(30, 1);
+		u32 rsvdp = readl(iommu->reg + DMAR_PMEN_REG) & rsvdp_mask;
+
+		if ((val & rsvdp_mask) != rsvdp) {
+			pkvm_err("iommu%d: PMEN reserved bits mismatch: %#x != %#x\n",
+				 iommu->seq_id, rsvdp,
+				 (u32)val & rsvdp_mask);
+			ret = -EINVAL;
+		} else if (val & DMA_PMEN_EPM) {
+			/* pKVM disables PMRs during IOMMU initialization. */
+			pkvm_err("iommu%d: attempt to enable PMRs\n",
+				 iommu->seq_id);
+			ret = -EPERM;
+		} else {
+			ret = iommu_direct_mmio_write(iommu, phys, len, val);
+		}
+		break;
+	}
 	case DMAR_PERFINTRCTL_REG:
 		if (!ecap_pms(iommu->ecap) && val) {
 			pkvm_err("iommu%d: perf interrupt control without PMU support\n",
@@ -792,6 +811,23 @@ int pkvm_intel_iommu_init(void)
 
 		pkvm_spin_lock_init(&iommu->lock);
 		iommu->vgsts = readl(iommu->reg + DMAR_GSTS_REG);
+
+		/*
+		 * PMRs are a legacy mechanism used by firmware to protect memory
+		 * before DMA remapping is active. Disable them before giving the
+		 * host access to the IOMMU again.
+		 */
+		if (cap_plmr(iommu->cap) || cap_phmr(iommu->cap)) {
+			u32 pmen = readl(iommu->reg + DMAR_PMEN_REG);
+
+			if (pmen & DMA_PMEN_EPM) {
+				pkvm_dbg("iommu%d: disabling PMRs\n",
+					 iommu->seq_id);
+				pmen &= ~DMA_PMEN_EPM;
+				writel(pmen, iommu->reg + DMAR_PMEN_REG);
+			}
+		}
+
 		/*
 		 * Interrupt remapping is enabled while x2APIC mode is set up,
 		 * before pKVM initialization. Protect the active table before
