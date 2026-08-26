@@ -481,3 +481,17 @@ int pkvm_modify_irte(struct intel_iommu *iommu, int index,
 
 	return ret;
 }
+
+int pkvm_write_iommu_msi(struct intel_iommu *iommu, u32 offset, u32 data,
+			 u32 addr, u32 uaddr)
+{
+	int ret;
+
+	ret = pkvm_hypercall(iommu_msi_write, iommu->reg_phys, offset, data,
+			     addr, uaddr);
+	if (ret)
+		pr_err("iommu%d: DMAR MSI write failed: %d\n",
+		       iommu->seq_id, ret);
+
+	return ret;
+}
