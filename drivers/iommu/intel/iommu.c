@@ -58,6 +58,12 @@
 #define DEFAULT_DOMAIN_ADDRESS_WIDTH 57
 
 #ifndef __PKVM_HYP__
+static inline bool is_igfx_device(struct pci_dev *pdev)
+{
+	return IS_GFX_DEVICE(pdev) && pci_is_root_bus(pdev->bus) &&
+	       pdev->vendor == PCI_VENDOR_ID_INTEL;
+}
+
 static void __init check_tylersburg_isoch(void);
 static int intel_iommu_set_dirty_tracking(struct iommu_domain *domain,
 					  bool enable);
@@ -1665,6 +1671,12 @@ static int device_def_domain_type(struct device *dev)
 	if (dev_is_pci(dev)) {
 		struct pci_dev *pdev = to_pci_dev(dev);
 
+		if (pkvm_enabled() && disable_igfx_iommu &&
+		    is_igfx_device(pdev)) {
+			pci_info(pdev, "force enabling IOMMU passthrough mode for graphics\n");
+			return IOMMU_DOMAIN_IDENTITY;
+		}
+
 		if ((iommu_identity_mapping & IDENTMAP_AZALIA) && IS_AZALIA(pdev))
 			return IOMMU_DOMAIN_IDENTITY;
 	}
@@ -2053,7 +2065,8 @@ static void __init init_no_remapping_devices(void)
 		/* This IOMMU has *only* gfx devices. Either bypass it or
 		   set the gfx_mapped flag, as appropriate */
 		drhd->gfx_dedicated = 1;
-		if (disable_igfx_iommu)
+		/* pKVM relies on every DMA-capable IOMMU remaining enabled. */
+		if (disable_igfx_iommu && !pkvm_enabled())
 			drhd->ignored = 1;
 	}
 }
