@@ -533,6 +533,44 @@ int pkvm_iommu_mmio_write(u64 phys, int len, u64 val)
 		}
 		break;
 	}
+	case DMAR_ECEO_REG:
+		if (!cap_ecmds(iommu->cap) && val) {
+			pkvm_err("iommu%d: non-zero ECEO without ECMD support\n",
+				 iommu->seq_id);
+			ret = -EINVAL;
+		} else {
+			ret = iommu_direct_mmio_write(iommu, phys, len, val);
+		}
+		break;
+	case DMAR_ECMD_REG:
+		if (!cap_ecmds(iommu->cap) && val) {
+			pkvm_err("iommu%d: non-zero ECMD without ECMD support\n",
+				 iommu->seq_id);
+			ret = -EINVAL;
+		} else if (val & GENMASK_ULL(15, 8)) {
+			pkvm_err("iommu%d: ECMD %#llx has reserved bits set\n",
+				 iommu->seq_id, val);
+			ret = -EINVAL;
+		} else {
+			u8 ecmd = val & 0xff;
+
+			/*
+			 * Only performance-monitoring counter controls are safe.
+			 * Unsupported commands are reported through ECRSP, so
+			 * checking their ECCAP3 bits here is unnecessary.
+			 */
+			if (ecmd != DMA_ECMD_ENABLE &&
+			    ecmd != DMA_ECMD_DISABLE &&
+			    ecmd != DMA_ECMD_FREEZE &&
+			    ecmd != DMA_ECMD_UNFREEZE) {
+				pkvm_err("iommu%d: unsupported ECMD %#x\n",
+					 iommu->seq_id, ecmd);
+				ret = -EPERM;
+			} else {
+				ret = iommu_direct_mmio_write(iommu, phys, len, val);
+			}
+		}
+		break;
 	case DMAR_PERFINTRCTL_REG:
 		if (!ecap_pms(iommu->ecap) && val) {
 			pkvm_err("iommu%d: perf interrupt control without PMU support\n",
