@@ -701,6 +701,7 @@ PT_IOMMU_CHECK_DOMAIN(struct dmar_domain, fspt.iommu, domain);
  */
 #define IOMMU_PMU_IDX_MAX		64
 
+#ifndef __PKVM_HYP__
 struct iommu_pmu {
 	struct intel_iommu	*iommu;
 	u32			num_cntr;	/* Number of counters */
@@ -725,7 +726,6 @@ struct iommu_pmu {
 #define IOMMU_IRQ_ID_OFFSET_PRQ		(DMAR_UNITS_SUPPORTED)
 #define IOMMU_IRQ_ID_OFFSET_PERF	(2 * DMAR_UNITS_SUPPORTED)
 
-#ifndef __PKVM_HYP__
 struct intel_iommu {
 	void __iomem	*reg; /* Pointer to hardware regs, virtual addr */
 	u64 		reg_phys; /* physical address of hw register set */
@@ -803,6 +803,17 @@ struct intel_iommu {
 	struct iommu_flush flush;
 	struct irte *ir_table;
 	struct root_entry *root_entry;
+	bool pmu_supported;
+	u64 pmu_perfcap;
+	u32 pmu_cfg;
+	u32 pmu_overflow;
+	u32 pmu_counter;
+	u32 pmu_num_cntr;
+	u32 pmu_num_eg;
+	u32 pmu_cntr_width;
+	u32 pmu_cntr_stride;
+	u32 pmu_filter;
+	u32 pmu_cntrcap[IOMMU_PMU_IDX_MAX];
 	/* Page supplied by the host for a new context or PASID table. */
 	void *donation_page;
 	pkvm_spinlock_t lock;

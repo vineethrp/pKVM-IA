@@ -192,6 +192,20 @@ int pkvm_iommu_pasid_setup_sl(struct pasid_setup_sl_data *in,
 			      struct pasid_setup_sl_data *out);
 int pkvm_iommu_pasid_teardown(struct pasid_teardown_data *data);
 int pkvm_iommu_modify_irte(struct modify_irte_data *data);
+
+/*
+ * Return value from a pKVM MMIO register validator meaning "this offset is not
+ * one of my registers" -- the dispatcher should try the next handler or fall to
+ * deny-by-default. Distinct from the validators' rejection codes (-EINVAL etc).
+ */
+#define IOMMU_REG_NOT_HANDLED	(-ENXIO)
+
+void pkvm_iommu_pmu_init(struct intel_iommu *iommu);
+
+int pkvm_iommu_pmu_validate_read(struct intel_iommu *iommu,
+				 unsigned long offset, int len);
+int pkvm_iommu_pmu_validate_write(struct intel_iommu *iommu,
+				  unsigned long offset, int len, u64 val);
 #endif /* !__PKVM_HYP__ */
 #else /* !CONFIG_PKVM_INTEL */
 static inline int pkvm_iec_flush(struct intel_iommu *iommu, bool global,
