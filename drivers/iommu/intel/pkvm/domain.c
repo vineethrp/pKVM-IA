@@ -5,12 +5,15 @@
 
 #include "pkvm/debug.h"
 #include "pkvm/pkvm.h"
+#include "pkvm/vmx/ept.h"
+
 #include "../iommu.h"
 
 static DEFINE_HASHTABLE(iommu_domain_hash, 8);
 static DECLARE_BITMAP(iommu_domain_bitmap, PKVM_MAX_IOMMU_DOMAINS);
 static struct dmar_domain iommu_domains[PKVM_MAX_IOMMU_DOMAINS];
 static DEFINE_PKVM_SPINLOCK(iommu_domain_lock);
+static struct dmar_domain passthrough_domain;
 
 static bool domain_compatible(struct dmar_domain *domain,
 			      struct intel_iommu *iommu)
@@ -19,6 +22,20 @@ static bool domain_compatible(struct dmar_domain *domain,
 		return false;
 
 	return cap_sagaw(iommu->cap) & BIT(domain->agaw);
+}
+
+int pkvm_iommu_domain_init(void)
+{
+	int level = pkvm_host_ept_level();
+
+	if (level < 2 || level > 6)
+		return -EINVAL;
+
+	passthrough_domain.root_pa = pkvm_host_ept_root();
+	passthrough_domain.agaw = level - 2;
+	pkvm_spin_lock_init(&passthrough_domain.lock);
+
+	return 0;
 }
 
 static struct dmar_domain *
@@ -46,12 +63,13 @@ pkvm_get_iommu_domain(phys_addr_t root, u16 did,
 {
 	struct dmar_domain *domain;
 
-	if (did == FLPT_DEFAULT_DID)
-		return NULL;
-
-	pkvm_spin_lock(&iommu_domain_lock);
-	domain = __pkvm_get_iommu_domain(root, true);
-	pkvm_spin_unlock(&iommu_domain_lock);
+	if (did == FLPT_DEFAULT_DID) {
+		domain = &passthrough_domain;
+	} else {
+		pkvm_spin_lock(&iommu_domain_lock);
+		domain = __pkvm_get_iommu_domain(root, true);
+		pkvm_spin_unlock(&iommu_domain_lock);
+	}
 
 	if (domain && !domain_compatible(domain, iommu)) {
 		pkvm_put_iommu_domain(domain);
@@ -63,6 +81,10 @@ pkvm_get_iommu_domain(phys_addr_t root, u16 did,
 
 void pkvm_put_iommu_domain(struct dmar_domain *domain)
 {
+	/* The static passthrough domain has a permanent lifetime. */
+	if (domain == &passthrough_domain)
+		return;
+
 	WARN_ON_ONCE(atomic_dec_if_positive(&domain->refcount) <= 0);
 }
 
