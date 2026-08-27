@@ -140,6 +140,7 @@ struct cache_tag *pkvm_alloc_cache_tag(void);
 void pkvm_free_cache_tag(struct cache_tag *tag);
 
 int pkvm_intel_iommu_init(void);
+void pkvm_iommu_pt_flush(unsigned long paddr, unsigned long size);
 int pkvm_iommu_mmio_read(u64 phys, int len, u64 *val);
 int pkvm_iommu_mmio_write(u64 phys, int len, u64 val);
 int pkvm_iommu_qi_submit(u64 phys, u64 desc_gpa, u32 count, u32 options);

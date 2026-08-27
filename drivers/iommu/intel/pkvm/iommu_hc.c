@@ -101,6 +101,7 @@ static int iommu_set_lm_ce(struct set_lm_ce_data *data)
 	struct intel_iommu *iommu = iommu_from_phys(data->phys);
 	struct device_domain_info info = {};
 	struct dmar_domain domain = {};
+	struct dmar_domain *target = &domain;
 	phys_addr_t root;
 	int level;
 	int ret;
@@ -139,8 +140,15 @@ static int iommu_set_lm_ce(struct set_lm_ce_data *data)
 		return -EINVAL;
 	domain.root_pa = root;
 	domain.use_first_level = false;
+	if (data->did == FLPT_DEFAULT_DID) {
+		target = pkvm_get_iommu_domain(0, data->did, iommu);
+		if (!target)
+			return -EINVAL;
+	}
 
-	ret = domain_context_mapping_one(&domain, &info, data->did);
+	ret = domain_context_mapping_one(target, &info, data->did);
+	if (target != &domain)
+		pkvm_put_iommu_domain(target);
 	if (ret == -EEXIST)
 		ret = 0;
 
@@ -283,6 +291,7 @@ static int iommu_pasid_setup_sl(struct pasid_setup_sl_data *data)
 	struct intel_iommu *iommu = iommu_from_phys(data->phys);
 	struct device_domain_info info = {};
 	struct dmar_domain domain = {};
+	struct dmar_domain *target = &domain;
 	phys_addr_t root;
 	int level;
 	int ret;
@@ -309,6 +318,11 @@ static int iommu_pasid_setup_sl(struct pasid_setup_sl_data *data)
 		return -EINVAL;
 	domain.root_pa = root;
 	domain.use_first_level = false;
+	if (data->did == FLPT_DEFAULT_DID) {
+		target = pkvm_get_iommu_domain(0, data->did, iommu);
+		if (!target)
+			return -EINVAL;
+	}
 
 	info.segment = data->segment;
 	info.bus = data->bus;
@@ -319,8 +333,10 @@ static int iommu_pasid_setup_sl(struct pasid_setup_sl_data *data)
 	if (ret)
 		return ret;
 
-	ret = intel_pasid_setup_second_level(iommu, &domain, &info,
+	ret = intel_pasid_setup_second_level(iommu, target, &info,
 					     data->did, data->pasid);
+	if (target != &domain)
+		pkvm_put_iommu_domain(target);
 	return ret;
 }
 

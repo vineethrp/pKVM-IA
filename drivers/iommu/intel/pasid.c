@@ -295,6 +295,9 @@ int intel_pasid_tear_down_entry(struct intel_iommu *iommu,
 {
 	struct pasid_entry *pte;
 	u16 did, pgtt;
+#ifdef __PKVM_HYP__
+	struct dmar_domain *domain = NULL;
+#endif
 
 #ifndef __PKVM_HYP__
 	if (pkvm_enabled()) {
@@ -358,6 +361,11 @@ int intel_pasid_tear_down_entry(struct intel_iommu *iommu,
 	if (pgtt != PASID_ENTRY_PGTT_FL_ONLY &&
 	    pgtt != PASID_ENTRY_PGTT_SL_ONLY)
 		return -EINVAL;
+	if (did == FLPT_DEFAULT_DID) {
+		domain = pkvm_get_iommu_domain(0, did, iommu);
+		if (!domain)
+			return -ENOENT;
+	}
 #endif
 	pasid_clear_present(pte);
 #ifndef __PKVM_HYP__
@@ -382,6 +390,11 @@ int intel_pasid_tear_down_entry(struct intel_iommu *iommu,
 #ifndef __PKVM_HYP__
 	if (!fault_ignore)
 		intel_iommu_drain_pasid_prq(dev, pasid);
+#else
+	if (domain) {
+		cache_tag_unassign_domain(domain, did, dev, pasid);
+		pkvm_put_iommu_domain(domain);
+	}
 #endif
 
 	return 0;
@@ -669,6 +682,15 @@ int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 	if (intel_domain_is_fs_paging(domain)) {
 		spin_unlock(&iommu->lock);
 		return -EINVAL;
+	}
+
+	if (did == FLPT_DEFAULT_DID) {
+		int ret = cache_tag_assign_domain(domain, did, dev, pasid);
+
+		if (ret) {
+			spin_unlock(&iommu->lock);
+			return ret;
+		}
 	}
 #endif
 

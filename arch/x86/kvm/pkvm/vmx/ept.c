@@ -190,6 +190,8 @@ static void host_ept_flush_tlb(struct pkvm_pgtable *pgt,
 		pkvm_kick_vcpu(vcpu);
 	}
 
+	pkvm_iommu_pt_flush(vaddr, size);
+
 	for_each_pkvm_initialized_cpu(i, vcpu)
 		pkvm_wait_vcpu_kicked_out(vcpu);
 }
