@@ -15,13 +15,74 @@ static struct dmar_domain iommu_domains[PKVM_MAX_IOMMU_DOMAINS];
 static DEFINE_PKVM_SPINLOCK(iommu_domain_lock);
 static struct dmar_domain passthrough_domain;
 
+static unsigned int domain_pgsize_mask(struct intel_iommu *iommu,
+				       bool use_first_level)
+{
+	unsigned int mask = BIT(PG_LEVEL_4K) | BIT(PG_LEVEL_2M);
+
+	if (use_first_level) {
+		if (cap_fl1gp_support(iommu->cap))
+			mask |= BIT(PG_LEVEL_1G);
+	} else {
+		unsigned int superpage = cap_super_page_val(iommu->cap);
+
+		if (!(superpage & BIT(0)))
+			mask &= ~BIT(PG_LEVEL_2M);
+		if (superpage & BIT(1))
+			mask |= BIT(PG_LEVEL_1G);
+	}
+
+	return mask;
+}
+
+static int domain_iova_bits(struct intel_iommu *iommu,
+			    bool use_first_level, u8 agaw, u8 *iova_bits)
+{
+	unsigned int width;
+
+	if (agaw != 2 && agaw != 3)
+		return -EINVAL;
+
+	if (use_first_level) {
+		if (!sm_supported(iommu) || !ecap_flts(iommu->ecap) ||
+		    (agaw == 3 && !cap_fl5lp_support(iommu->cap)))
+			return -EINVAL;
+	} else if (sm_supported(iommu) && !ecap_slts(iommu->ecap)) {
+		return -EINVAL;
+	} else if (!(cap_sagaw(iommu->cap) & BIT(agaw))) {
+		return -EINVAL;
+	}
+
+	width = min_t(unsigned int, 30 + agaw * LEVEL_STRIDE,
+		      cap_mgaw(iommu->cap));
+	if (use_first_level)
+		width--;
+	if (width < VTD_PAGE_SHIFT)
+		return -EINVAL;
+
+	*iova_bits = width;
+	return 0;
+}
+
 static bool domain_compatible(struct dmar_domain *domain,
 			      struct intel_iommu *iommu)
 {
-	if (sm_supported(iommu) && !ecap_slts(iommu->ecap))
+	u8 iova_bits;
+
+	if (domain == &passthrough_domain)
+		return (!sm_supported(iommu) || ecap_slts(iommu->ecap)) &&
+		       (cap_sagaw(iommu->cap) & BIT(domain->agaw));
+
+	if (domain_iova_bits(iommu, domain->use_first_level, domain->agaw,
+			     &iova_bits))
+		return false;
+	if (domain->iova_bits > iova_bits)
+		return false;
+	if (domain->pgsz_mask &
+	    ~domain_pgsize_mask(iommu, domain->use_first_level))
 		return false;
 
-	return cap_sagaw(iommu->cap) & BIT(domain->agaw);
+	return true;
 }
 
 int pkvm_iommu_domain_init(void)
@@ -99,13 +160,20 @@ void pkvm_put_iommu_domain(struct dmar_domain *domain)
 }
 
 struct dmar_domain *
-pkvm_alloc_iommu_domain(phys_addr_t root, u8 agaw, bool use_first_level)
+pkvm_alloc_iommu_domain(struct intel_iommu *iommu, phys_addr_t root, u8 agaw,
+			bool use_first_level)
 {
 	struct dmar_domain *domain;
+	u8 iova_bits;
 	unsigned long index;
+	int ret;
 
-	if (!root || !PAGE_ALIGNED(root) || agaw > 3)
+	if (!iommu || !root || !PAGE_ALIGNED(root))
 		return ERR_PTR(-EINVAL);
+
+	ret = domain_iova_bits(iommu, use_first_level, agaw, &iova_bits);
+	if (ret)
+		return ERR_PTR(ret);
 
 	pkvm_spin_lock(&iommu_domain_lock);
 	if (__pkvm_get_iommu_domain(root, false)) {
@@ -124,7 +192,9 @@ pkvm_alloc_iommu_domain(phys_addr_t root, u8 agaw, bool use_first_level)
 	domain = &iommu_domains[index];
 	domain->root_pa = root;
 	domain->agaw = agaw;
+	domain->iova_bits = iova_bits;
 	domain->use_first_level = use_first_level;
+	domain->pgsz_mask = domain_pgsize_mask(iommu, use_first_level);
 	domain->index = index;
 	atomic_set(&domain->refcount, 1);
 	pkvm_spin_lock_init(&domain->lock);
