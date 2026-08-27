@@ -41,6 +41,13 @@ int pkvm_iommu_domain_init(void)
 	return 0;
 }
 
+void pkvm_iommu_pt_flush(unsigned long paddr, unsigned long size)
+{
+	if (passthrough_domain.qi_batch)
+		cache_tag_flush_range(&passthrough_domain, paddr,
+				      paddr + size - 1, 0);
+}
+
 static struct dmar_domain *
 __pkvm_get_iommu_domain(phys_addr_t root, bool take_ref)
 {

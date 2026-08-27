@@ -1286,6 +1286,12 @@ static int domain_context_mapping_one(struct dmar_domain *domain,
 	}
 	device_allocated = true;
 	info = &device->info;
+	if (did == FLPT_DEFAULT_DID) {
+		ret = cache_tag_assign_domain(domain, did, device,
+					      IOMMU_NO_PASID);
+		if (ret)
+			goto out_unlock;
+	}
 #else
 	if (context_present(context) && !context_copied(iommu, bus, devfn))
 		goto out_unlock;
@@ -1403,6 +1409,7 @@ int domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
 	struct context_entry *context;
 #ifdef __PKVM_HYP__
 	struct pkvm_device *device;
+	struct dmar_domain *domain = NULL;
 	struct pasid_dir_entry *pasid_dir = NULL;
 	int max_pde = 0;
 #endif
@@ -1444,6 +1451,15 @@ int domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
 	}
 #endif
 	did = context_domain_id(context);
+#ifdef __PKVM_HYP__
+	if (did == FLPT_DEFAULT_DID) {
+		domain = pkvm_get_iommu_domain(0, did, iommu);
+		if (!domain) {
+			ret = -ENOENT;
+			goto out_unlock;
+		}
+	}
+#endif
 	context_clear_present(context);
 	__iommu_flush_cache(iommu, context, sizeof(*context));
 #ifndef __PKVM_HYP__
@@ -1452,6 +1468,11 @@ int domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn)
 	intel_context_flush_no_pasid(info, context, did);
 	context_clear_entry(context);
 #ifdef __PKVM_HYP__
+	if (domain) {
+		cache_tag_unassign_domain(domain, did, device,
+					  IOMMU_NO_PASID);
+		pkvm_put_iommu_domain(domain);
+	}
 	pkvm_remove_iommu_device(device);
 	spin_unlock(&iommu->lock);
 #endif
