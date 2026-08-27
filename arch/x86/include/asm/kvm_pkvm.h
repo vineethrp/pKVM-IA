@@ -94,6 +94,18 @@ struct set_sm_ce_data {
 	u8 pri_supported:1;
 	u8 pri_enabled:1;
 };
+
+struct pasid_setup_fl_data {
+	u64 phys;
+	u64 fsptptr_gpa;
+	u64 donation_page_gpa;
+	u32 pasid;
+	u32 flags;
+	u16 segment;
+	u16 did;
+	u8 bus;
+	u8 devfn;
+};
 #endif
 
 #define TO_PKVM_HC(f)		CONCATENATE(__pkvm__, f)
@@ -185,6 +197,10 @@ union pkvm_hc_data {
 		struct set_sm_ce_data in;
 		struct set_sm_ce_data out;
 	} iommu_set_sm_ce;
+	union {
+		struct pasid_setup_fl_data in;
+		struct pasid_setup_fl_data out;
+	} iommu_pasid_setup_fl;
 #endif
 	struct {
 		bool has_intr;

@@ -186,3 +186,52 @@ int pkvm_iommu_set_sm_ce(struct set_sm_ce_data *in,
 	*out = *in;
 	return ret;
 }
+
+static int iommu_pasid_setup_fl(struct pasid_setup_fl_data *data)
+{
+	struct intel_iommu *iommu = iommu_from_phys(data->phys);
+	struct device_domain_info info = {};
+	struct dmar_domain domain = {};
+	phys_addr_t fsptptr;
+	int ret;
+
+	if (!iommu || !iommu->root_entry || !sm_supported(iommu))
+		return -EINVAL;
+
+	if (data->did == FLPT_DEFAULT_DID)
+		return -EPERM;
+
+	if (data->flags & ~(PASID_FLAG_FL5LP | PASID_FLAG_PAGE_SNOOP |
+			    PASID_FLAG_PWSNP))
+		return -EINVAL;
+
+	fsptptr = pkvm_host_gpa_to_phys(data->fsptptr_gpa);
+	if (!fsptptr || !PAGE_ALIGNED(fsptptr))
+		return -EINVAL;
+
+	domain.root_pa = fsptptr;
+	domain.use_first_level = true;
+
+	info.segment = data->segment;
+	info.bus = data->bus;
+	info.devfn = data->devfn;
+	info.iommu = iommu;
+
+	ret = accept_page_donation(iommu, &data->donation_page_gpa);
+	if (ret)
+		return ret;
+
+	ret = intel_pasid_setup_first_level(iommu, &info, &domain, fsptptr,
+					    data->pasid, data->did,
+					    data->flags);
+	return ret;
+}
+
+int pkvm_iommu_pasid_setup_fl(struct pasid_setup_fl_data *in,
+			      struct pasid_setup_fl_data *out)
+{
+	int ret = iommu_pasid_setup_fl(in);
+
+	*out = *in;
+	return ret;
+}
