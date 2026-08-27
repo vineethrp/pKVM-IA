@@ -313,7 +313,8 @@ int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 #else
 struct pasid_table *intel_pasid_get_table(struct pkvm_device *dev);
 int intel_pasid_setup_first_level(struct intel_iommu *iommu,
-				  struct pkvm_device *dev,
+				  struct device_domain_info *info,
+				  struct dmar_domain *domain,
 				  phys_addr_t fsptptr, u32 pasid, u16 did,
 				  int flags);
 int intel_pasid_setup_second_level(struct intel_iommu *iommu,

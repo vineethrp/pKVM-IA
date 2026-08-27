@@ -440,12 +440,16 @@ static void pasid_pte_config_first_level(struct intel_iommu *iommu,
 int intel_pasid_setup_first_level(struct intel_iommu *iommu, struct device *dev,
 #else
 int intel_pasid_setup_first_level(struct intel_iommu *iommu,
-				  struct pkvm_device *dev,
+				  struct device_domain_info *info,
+				  struct dmar_domain *domain,
 #endif
 				  phys_addr_t fsptptr, u32 pasid, u16 did,
 				  int flags)
 {
 	struct pasid_entry *pte;
+#ifdef __PKVM_HYP__
+	struct pkvm_device *dev;
+#endif
 
 	if (!ecap_flts(iommu->ecap)) {
 		pr_err("No first level translation support on iommu%d\n",
@@ -460,6 +464,14 @@ int intel_pasid_setup_first_level(struct intel_iommu *iommu,
 	}
 
 	spin_lock(&iommu->lock);
+#ifdef __PKVM_HYP__
+	dev = pkvm_get_iommu_device(iommu, info->segment,
+				    info->bus, info->devfn);
+	if (IS_ERR(dev)) {
+		spin_unlock(&iommu->lock);
+		return PTR_ERR(dev);
+	}
+#endif
 	pte = intel_pasid_get_entry(dev, pasid);
 	if (IS_ERR(pte)) {
 		spin_unlock(&iommu->lock);
@@ -470,6 +482,13 @@ int intel_pasid_setup_first_level(struct intel_iommu *iommu,
 		spin_unlock(&iommu->lock);
 		return -EBUSY;
 	}
+
+#ifdef __PKVM_HYP__
+	if (!intel_domain_is_fs_paging(domain)) {
+		spin_unlock(&iommu->lock);
+		return -EINVAL;
+	}
+#endif
 
 	pasid_pte_config_first_level(iommu, pte, fsptptr, did, flags);
 
