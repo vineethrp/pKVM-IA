@@ -22,6 +22,22 @@
 static struct pkvm_pgtable *host_ept;
 static struct pkvm_pool host_ept_pool;
 
+phys_addr_t pkvm_host_ept_root(void)
+{
+	if (WARN_ON(!host_ept))
+		return INVALID_PAGE;
+
+	return host_ept->root_pa;
+}
+
+int pkvm_host_ept_level(void)
+{
+	if (WARN_ON(!host_ept))
+		return 0;
+
+	return host_ept->cap.level;
+}
+
 static void *host_ept_zalloc_page(struct pkvm_memcache *mc)
 {
 	return pkvm_alloc_pages(&host_ept_pool, 0);
