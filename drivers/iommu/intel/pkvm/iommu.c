@@ -592,5 +592,5 @@ int pkvm_intel_iommu_init(void)
 		iommu->vgsts = readl(iommu->reg + DMAR_GSTS_REG);
 	}
 
-	return 0;
+	return pkvm_iommu_domain_init();
 }
