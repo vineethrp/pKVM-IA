@@ -611,7 +611,9 @@ struct qi_batch {
 struct dmar_domain {
 	phys_addr_t root_pa;
 	u8 agaw;
+	u8 iova_bits;
 	u8 use_first_level:1;
+	unsigned int pgsz_mask;
 	atomic_t refcount;
 	unsigned int index;
 	struct hlist_node hnode;

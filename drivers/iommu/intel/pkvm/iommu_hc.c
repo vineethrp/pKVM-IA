@@ -30,16 +30,21 @@ int pkvm_iommu_qi_submit(u64 phys, u64 desc_gpa, u32 count, u32 options)
 			      count, options);
 }
 
-int pkvm_iommu_alloc_domain(u64 root_gpa, u8 agaw, bool use_first_level)
+int pkvm_iommu_alloc_domain(u64 iommu_phys, u64 root_gpa, u8 agaw,
+			    bool use_first_level)
 {
 	phys_addr_t root = pkvm_host_gpa_to_phys(root_gpa);
+	struct intel_iommu *iommu = iommu_from_phys(iommu_phys);
 	struct dmar_domain *domain;
+
+	if (!iommu)
+		return -EINVAL;
 
 	/*
 	 * TODO: Protect and refcount the root after page-table updates are
 	 * routed through pKVM.
 	 */
-	domain = pkvm_alloc_iommu_domain(root, agaw, use_first_level);
+	domain = pkvm_alloc_iommu_domain(iommu, root, agaw, use_first_level);
 	if (IS_ERR(domain))
 		return PTR_ERR(domain);
 
